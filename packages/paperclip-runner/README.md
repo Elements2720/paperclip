@@ -771,6 +771,7 @@ a hook that also blocks the reporting tool can leave only a generic diagnostic.
 Runner retains private protocol/session state and a fence for each session.
 Different sessions may share the same home. Mode and home bindings fence recovery;
 switching either requires a new session. Backups never include the external home.
+Recovering a run uses its saved mode even if the agent configuration has changed.
 Remote execution discovers the execution account's home on the remote machine
 using `getent`; it does not copy the controller's HOME, XDG paths, or login state.
 The external provider history must still exist to resume a session after a remote

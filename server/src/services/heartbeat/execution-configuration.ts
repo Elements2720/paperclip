@@ -40,6 +40,14 @@ const ACCEPTED_PLAN_CONVERSION_SKILL_KEY =
 type ManagedAiRuntime = Awaited<ReturnType<typeof prepareManagedAiRuntime>>;
 type EnvironmentSelection = Awaited<ReturnType<typeof selectHeartbeatEnvironment>>;
 
+/** Preparation and routing must use the same immutable mode as native recovery. */
+export function bindHeartbeatRunnerHomeMode(config: Record<string, unknown>, persistedExecution: unknown): Record<string, unknown> {
+  const saved = parseObject(persistedExecution);
+  if (Object.keys(saved).length === 0) return config;
+  // Execution schemas before v7 always used isolated homes.
+  return { ...config, homeMode: saved.homeMode ?? "isolated" };
+}
+
 export interface HeartbeatExecutionConfigurationInput {
   run: typeof heartbeatRuns.$inferSelect;
   agent: typeof agents.$inferSelect;
@@ -77,11 +85,13 @@ export async function prepareHeartbeatExecutionConfiguration(db: Db, input: Hear
   const { run, agent, onFailureSecretsResolved, onManagedAiRuntimeAcquired, onIdentityRedactorPrepared } = input;
   const time = createHeartbeatPreparationTiming(run.id);
   const { issueId, context, responsibleUserId, acceptedPlanContinuationWake, acceptedPlanWakeRoutingDecision, taskProjectContext, routineEnvContext } = input.task;
-  const { sourceWorkspaceConfig } = input.config;
+  const { selectedEnvironmentId, selectedEnvironmentForConfig, resolvedInstanceSettings, persistedNativeExecutionInput } = input.environment;
+  const sourceWorkspaceConfig = agent.adapterType === "paperclip_runner"
+    ? bindHeartbeatRunnerHomeMode(input.config.sourceWorkspaceConfig, persistedNativeExecutionInput)
+    : input.config.sourceWorkspaceConfig;
   const preconfiguredHome = agent.adapterType === "paperclip_runner" && sourceWorkspaceConfig.homeMode === "preconfigured";
   const aiBinding = preconfiguredHome ? undefined : input.config.aiBinding;
   const { trustPreset, useIsolatedTaskDirectory, explicitTaskDirectory } = input.policy;
-  const { selectedEnvironmentId, selectedEnvironmentForConfig, resolvedInstanceSettings, persistedNativeExecutionInput } = input.environment;
   const { secretsSvc, companySkills, appendRunEvent, finalizeAiConnectionBusyDeferral } = input.services;
   let managedAiRuntime: ManagedAiRuntime | undefined;
   const mergedConfig = {

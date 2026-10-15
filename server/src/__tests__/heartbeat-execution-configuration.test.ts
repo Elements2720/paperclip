@@ -12,6 +12,10 @@ import { companySkillService } from "../services/company-skills.js";
 import { registerServerAdapter, unregisterServerAdapter, type AdapterExecutionContext } from "../adapters/index.js";
 import { HttpError } from "../errors.js";
 import { heartbeatService } from "../services/heartbeat.js";
+import { bindHeartbeatRunnerHomeMode, prepareHeartbeatExecutionConfiguration, type HeartbeatExecutionConfigurationInput } from "../services/heartbeat/execution-configuration.js";
+import { aiRuntimeConnectionBindingSchema } from "@paperclipai/shared";
+import { secretService } from "../services/secrets.js";
+import { instanceSettingsService } from "../services/instance-settings.js";
 import { aiConnectionService } from "../services/ai-connections.js";
 import * as aiRuntime from "../services/ai-connection-runtime.js";
 import * as sentry from "../sentry.js";
@@ -19,6 +23,27 @@ import { waitForPendingRunFailureReports } from "../services/run-failure-report.
 import { getEmbeddedPostgresTestSupport, startEmbeddedPostgresTestDatabase } from "./helpers/embedded-postgres.js";
 
 const skillFailures = vi.hoisted(() => new Map<string, string>());
+
+describe("Runner home mode during recovery preparation", () => {
+  it.each([
+    ["preconfigured", { schema: "paperclip.native-execution-input.v5" }, "isolated"],
+    ["preconfigured", { schema: "paperclip.native-execution-input.v7", homeMode: "isolated" }, "isolated"],
+    ["isolated", { schema: "paperclip.native-execution-input.v7", homeMode: "preconfigured" }, "preconfigured"],
+  ])("prepares the saved mode after current configuration changes to %s", (current, saved, expected) => {
+    const config = { homeMode: current, model: "current-model", env: { TASK_VALUE: "kept" } };
+    // Called before router selection and again after mutable task overrides.
+    const routed = bindHeartbeatRunnerHomeMode(config, saved);
+    const prepared = bindHeartbeatRunnerHomeMode({ ...routed, homeMode: current }, saved);
+    expect(prepared).toEqual({ ...config, homeMode: expected });
+    expect(config.homeMode).toBe(current);
+  });
+
+  it.each(["isolated", "preconfigured", undefined])("uses current mode %s for a new run", homeMode => {
+    const config = { homeMode };
+    expect(bindHeartbeatRunnerHomeMode(config, null)).toBe(config);
+    expect(bindHeartbeatRunnerHomeMode(config, {})).toBe(config);
+  });
+});
 vi.mock("../services/company-skills.js", async importOriginal => {
   const actual = await importOriginal<typeof import("../services/company-skills.js")>();
   return { ...actual, companySkillService: (...args: Parameters<typeof actual.companySkillService>) => {
@@ -88,7 +113,7 @@ describePostgres("heartbeat execution configuration through adapter dispatch", (
       runtimeConfig: account ? { aiConnection: { provider: "openai", method: "api_key", mode: "delegated", connectionId: account.connectionId, grantId: account.grantId } } : {},
     });
     await db.insert(issues).values({ id: issueId, companyId, projectId, title: "Configuration fixture", status: "todo", assigneeAgentId: agentId, responsibleUserId: userId, issueNumber: 1, assigneeAdapterOverrides: { adapterConfig: { model: "issue-model" } } });
-    return { companyId, agentId, issueId, credential };
+    return { companyId, agentId, issueId, userId, credential };
   }
 
   async function execute(f: Awaited<ReturnType<typeof seed>>) {
@@ -102,6 +127,45 @@ describePostgres("heartbeat execution configuration through adapter dispatch", (
     expect(finished).toBeDefined();
     return { finished, input: captured.get(run!.id) };
   }
+
+  it.each([
+    { saved: "isolated", managed: true, failure: "saved managed login required" },
+    { saved: "isolated", managed: false, failure: "saved isolated skills required" },
+    { saved: "preconfigured", managed: true, failure: null },
+  ] as const)("retains $saved preparation after configuration changes (managed: $managed)", async ({ saved, managed, failure }) => {
+    const f = await seed(managed);
+    const [agent] = await db.update(agents).set({ adapterType: "paperclip_runner", adapterConfig: {
+      provider: "codex", model: "gpt-6.1-sol", homeMode: saved === "isolated" ? "preconfigured" : "isolated",
+    } }).where(eq(agents.id, f.agentId)).returning();
+    const [run] = await db.insert(heartbeatRuns).values({ companyId: f.companyId, agentId: f.agentId,
+      status: "running", runtimeMode: "native", contextSnapshot: { issueId: f.issueId },
+    }).returning();
+    const prepare = vi.spyOn(aiRuntime, "prepareManagedAiRuntime").mockRejectedValue(new Error("saved managed login required"));
+    skillFailures.set(f.companyId, "saved isolated skills required");
+    // Preparation only reads the persisted mode and whether recovery is active.
+    const persisted = { schema: saved === "isolated" ? "paperclip.native-execution-input.v5" : "paperclip.native-execution-input.v7",
+      ...(saved === "preconfigured" ? { homeMode: saved } : {}),
+    } as unknown as HeartbeatExecutionConfigurationInput["environment"]["persistedNativeExecutionInput"];
+    const opening = prepareHeartbeatExecutionConfiguration(db, {
+      run, agent, task: { issueId: f.issueId, context: {}, responsibleUserId: f.userId,
+        acceptedPlanContinuationWake: false, acceptedPlanWakeRoutingDecision: null, taskProjectContext: null,
+        routineEnvContext: { routineId: null, env: null, responsibleUserId: null } },
+      config: { sourceWorkspaceConfig: agent.adapterConfig, aiBinding: managed
+        ? aiRuntimeConnectionBindingSchema.parse(agent.runtimeConfig!.aiConnection) : undefined },
+      policy: { trustPreset: { kind: "standard", preset: "standard", boundary: null, sourcePresets: {} },
+        useIsolatedTaskDirectory: false, explicitTaskDirectory: false },
+      environment: { selectedEnvironmentId: null, selectedEnvironmentForConfig: null,
+        resolvedInstanceSettings: await instanceSettingsService(db).get(), persistedNativeExecutionInput: persisted },
+      services: { secretsSvc: secretService(db), companySkills: companySkillService(db), appendRunEvent: vi.fn(), finalizeAiConnectionBusyDeferral: vi.fn() },
+      onFailureSecretsResolved: vi.fn(), onManagedAiRuntimeAcquired: vi.fn(), onIdentityRedactorPrepared: vi.fn(),
+    });
+    if (failure) await expect(opening).rejects.toThrow(failure);
+    else {
+      expect(await opening).toMatchObject({ prepared: true, runtimeConfig: { homeMode: "preconfigured" }, runtimeSkillEntries: [] });
+      expect(prepare).not.toHaveBeenCalled();
+    }
+    if (managed && saved === "isolated") expect(prepare).toHaveBeenCalledOnce();
+  });
 
   it("dispatches preconfigured Runner preparation without acquiring managed auth or materializing assigned skills", async () => {
     const f = await seed(true);
