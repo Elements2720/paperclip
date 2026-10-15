@@ -239,7 +239,7 @@ test("workflow exporter runs trusted code and keeps keys out of the PR jobs", ()
   assert.match(workflow, /environment: ci-profiling/);
   assert.doesNotMatch(workflow, /head_sha|secrets: inherit|contents: write|pull-requests: write|pnpm install/);
   const pr = readFileSync(new URL("../../workflows/pr-trusted.yml", import.meta.url), "utf8");
-  assert.doesNotMatch(pr, /HONEYCOMB.*KEY|secrets\./);
+  assert.doesNotMatch(pr, /HONEYCOMB.*KEY|\$\{\{\s*secrets(?:\.|\[)/);
   assert.match(pr, /if: always\(\) && env.PAPERCLIP_CI_PROFILE == 'true'/);
   assert.doesNotMatch(pr, /PAPERCLIP_CI_PROFILE:.*labels/);
   assert.equal(pr.match(/PAPERCLIP_CI_PROFILE: \$\{\{ needs.gate.outputs.profile_ci \}\}/g).length, 9);

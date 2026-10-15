@@ -63,7 +63,6 @@ fn credential_updates_replay_through_the_native_executor_until_durable_ack() {
     let mut executor = NativeProviderCommandExecutor::with_runner_config(&root, &runner_config);
     assert!(executor.poll_events().unwrap().is_empty());
     write_auth("refreshed");
-    // A command boundary forces the same final reread used before cleanup.
     let _ = executor.execute(&Command {
         schema: "paperclip.prp.command.v1".to_owned(),
         command_id: "close-unselected".to_owned(),
