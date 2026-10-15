@@ -18,6 +18,17 @@ Native runners retain a session-owned broker and launcher path across warm turns
 
 The session broker listens only on controller loopback and accepts only its authenticated GitHub credential operation. Remote executions reach it through the existing authenticated callback bridge. Its transport and launchers are retired with the provider session. If remote bridge startup fails, anonymous launchers keep ordinary work available; the next run retries setup with a fresh session. Controller restart/cold recovery still uses the existing checkpoint and process-recovery rules; the broker's in-memory authority is not persisted for adoption.
 
+The native GitHub callback bridge uses HTTP/2 only when the server-selected
+`enableSandboxDuplexBridge` flag and the sandbox's verified duplex capability
+permit it. Missing settings, unsupported providers and failed channel startup
+keep the authenticated file bridge. Changing the server flag retires a retained
+warm bridge at the next normal run boundary, before a retained instruction copy
+is claimed. A lost HTTP/2 channel also makes the broker unavailable and retires
+that warm session at its next admission. An unchanged flag and a healthy broker
+permit reuse. Normal session cleanup closes the channel as an orderly completion.
+This selection changes transport only; operation-time credential checks remain
+the same. Local and SSH execution retain their existing transport.
+
 Other adapters continue using the run-scoped signed capability and public broker endpoint. That endpoint rejects browser origins and session cookies, validates a distinct signed runtime scope, and rechecks the company, agent, and live run. GitHub credentials are returned only to the managed command process, never persisted in identity history or injected into the long-lived provider process.
 
 Low-trust executions cannot receive raw GitHub credentials, including dedicated

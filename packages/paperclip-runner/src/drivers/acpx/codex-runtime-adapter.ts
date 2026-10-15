@@ -478,13 +478,18 @@ export async function openQualifiedAcpxRuntime(
           // Forward the requested model unchanged; verify the provider's
           // reported selection before admitting a billable prompt.
           model: options.profile.reportedModelId,
+          ...(preconfigured && options.profile.agent === "claude" ? {
+            allowedTools: options.mcpServers
+              .filter(server => server.runnerOwned && server.name.startsWith("paperclip_runner_"))
+              .map(server => `mcp__${server.name}__*`),
+          } : {}),
           ...(options.systemInstructions
             ? { systemPrompt: { append: options.systemInstructions } }
             : {}),
         },
       }),
     );
-  const handshake = (cursorInstructions || modeBinding
+  const sessionHandshake = (cursorInstructions || modeBinding
     ? ensuredSession.then(async (ensuredHandle) => {
         handle = ensuredHandle;
         options.signal?.throwIfAborted();
@@ -535,6 +540,20 @@ export async function openQualifiedAcpxRuntime(
     .catch((error: unknown) => {
       throw classifySessionEnsureFailure(error);
     });
+  const handshake = preconfigured && options.profile.agent === "codex"
+    ? sessionHandshake.then(async (ensuredHandle) => {
+        handle = ensuredHandle;
+        options.signal?.throwIfAborted();
+        if (!runtime.setMode) throw new Error("preconfigured_codex_unattended_mode_unavailable");
+        await children.verifyLifetimeOwnership();
+        await commandLaunches.refreshConsumedCommand?.();
+        await runtime.setMode({ handle: ensuredHandle, mode: "agent-full-access" });
+        options.signal?.throwIfAborted();
+        await children.verifyLifetimeOwnership();
+        await commandLaunches.refreshConsumedCommand?.();
+        return ensuredHandle;
+      })
+    : sessionHandshake;
   let lateCleanup: Promise<void> | null = null;
   try {
     const boundedHandshake = boundedSessionHandshake(
@@ -550,13 +569,6 @@ export async function openQualifiedAcpxRuntime(
     // A provider can answer only after the verified sentinel is armed, but do
     // not admit the session until the owner has observed that exact handoff.
     await children.verifyLifetimeOwnership();
-    if (preconfigured && options.profile.agent === "codex") {
-      if (!runtime.setMode) throw new Error("preconfigured_codex_unattended_mode_unavailable");
-      await commandLaunches.refreshConsumedCommand?.();
-      await runtime.setMode({ handle, mode: "agent-full-access" });
-      await children.verifyLifetimeOwnership();
-      await commandLaunches.refreshConsumedCommand?.();
-    }
     // The handshake or lifetime-ownership observation can settle in the same
     // turn as cancellation. Never admit that newly acquired authority.
     options.signal?.throwIfAborted();

@@ -109,6 +109,9 @@ describe("NativeExecutionInputV1", () => {
       runtimeContext: { ...context, aggregateDigest: canonicalNativeRuntimeContextDigest(context) },
     };
     expect(parseNativeExecutionInput(preconfigured)).toMatchObject({ homeMode: "preconfigured" });
+    for (const permissionMode of ["approve-reads", "approve-paperclip", "deny-all"]) {
+      expect(() => parseNativeExecutionInput({ ...preconfigured, provider: { kind: "acpx", agent: "codex", permissionMode } })).toThrow("requires ACPX approve-all");
+    }
     expect(buildNativeModelEnvelope(parseNativeExecutionInput(preconfigured)).schema).toBe("paperclip.native-model-envelope.v3");
     expect(() => parseNativeExecutionInput({ ...preconfigured, homeMode: "other" })).toThrow("homeMode");
     expect(() => parseNativeExecutionInput({ ...preconfigured, provider: { kind: "opencode", model: "provider/model", permissionMode: "allow" } })).toThrow("supports Codex");

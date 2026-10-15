@@ -201,6 +201,40 @@ afterEach(async () => {
 });
 
 describe("ACPX runtime host", () => {
+  it.each(["approve-reads", "approve-paperclip", "deny-all"] as const)("rejects unqualified preconfigured permission mode %s before admission", async permissionMode => {
+    const fixture = await hostFixture();
+    const openRuntime = vi.fn();
+    await expect(AcpxRuntimeHost.open({ ...fixture.options, permissionMode,
+      environment: { HOME: fixture.root, PAPERCLIP_RUNNER_HOME_MODE: "preconfigured" },
+    }, fixture.dependencies({ openRuntime }))).rejects.toThrow("requires ACPX approve-all");
+    expect(openRuntime).not.toHaveBeenCalled();
+  });
+
+  it.each(["claude", "codex"] as const)("keeps a stable private bridge namespace without editing %s user MCP configuration", async agent => {
+    const fixture = await hostFixture();
+    const home = join(fixture.root, "user-home");
+    await mkdir(home);
+    const config = join(home, "user-mcp.json");
+    const contents = '{"mcpServers":{"paperclip":{"url":"http://127.0.0.1:3211/user"}}}';
+    await writeFile(config, contents);
+    const model = agent === "claude" ? "claude-sonnet-5" : "gpt-6.1-sol";
+    const names: string[] = [];
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const host = await AcpxRuntimeHost.open({ ...fixture.options, agent, model, permissionMode: "approve-all",
+        environment: { HOME: home, PAPERCLIP_RUNNER_HOME_MODE: "preconfigured" },
+        semanticTools: { tools: [], handler: async () => ({}) },
+      }, fixture.dependencies({ openRuntime: async options => {
+        names.push(options.mcpServers[0]!.name);
+        return runtimePort({ getStatus: async () => ({ models: { currentModelId: model } }) });
+      } }));
+      try {
+        expect(names.at(-1)).toMatch(/^paperclip_runner_[a-f0-9]{16}$/);
+        expect(await readFile(config, "utf8")).toBe(contents);
+      } finally { await host.close({ reason: "private namespace verified" }); }
+    }
+    expect(names[1]).toBe(names[0]);
+  });
+
   it.each([undefined, "plan", "ask"] as const)("requires observed Cursor mode %s in the host identity", async selected => {
     const fixture = await hostFixture();
     const mode = selected ?? "agent";

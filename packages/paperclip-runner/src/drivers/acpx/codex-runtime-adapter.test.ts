@@ -29,6 +29,32 @@ const HANDLE: AcpRuntimeHandle = {
 };
 
 describe("Codex ACPX runtime adapter", () => {
+  it.each(["timeout", "cancel"] as const)("ends preconfigured Codex admission on %s while mode selection is stalled", async kind => {
+    const runtime = fakeRuntime();
+    let started!: () => void;
+    let settle!: () => void;
+    const modeStarted = new Promise<void>(resolve => { started = resolve; });
+    const modePending = new Promise<void>(resolve => { settle = resolve; });
+    runtime.setMode = vi.fn(async () => { started(); await modePending; });
+    const options = openOptions(fakeCommand());
+    const controller = new AbortController();
+    options.signal = controller.signal;
+    options.permissionMode = "approve-all";
+    options.launchEnvironment = { HOME: "/users/executor", PAPERCLIP_RUNNER_HOME_MODE: "preconfigured" };
+    const retained: Promise<unknown>[] = [];
+    const opening = openCodexAcpxRuntime(options, {
+      createRegistry: () => registry(), createStore: () => store(), createRuntime: () => runtime,
+      sessionHandshakeTimeoutMs: 25, retainCleanup: cleanup => { retained.push(cleanup); },
+    });
+    const rejection = expect(opening).rejects.toThrow(kind === "cancel" ? "mode admission cancelled" : "handshake");
+    await modeStarted;
+    if (kind === "cancel") controller.abort(new Error("mode admission cancelled"));
+    await rejection;
+    expect(runtime.close).toHaveBeenCalled();
+    settle();
+    await Promise.allSettled(retained);
+  });
+
   it("installs per-connection policy authority only for Copilot and rejects native commands before a turn starts", async () => {
     for (const agent of ["copilot", "codex", "claude", "grok"] as const) {
       const runtime = fakeRuntime();
@@ -55,9 +81,16 @@ describe("Codex ACPX runtime adapter", () => {
     options.profile = { ...options.profile, agent };
     options.permissionMode = "approve-all";
     options.launchEnvironment = { HOME: "/users/executor", PAPERCLIP_RUNNER_HOME_MODE: "preconfigured" };
+    options.mcpServers = [
+      { name: "paperclip_runner_fixture", url: "http://127.0.0.1:3211/mcp", bearerToken: "runner-fixture", runnerOwned: true },
+      { name: "paperclip", url: "http://127.0.0.1:3212/mcp", bearerToken: "external-fixture", runnerOwned: false },
+    ];
     const port = await openCodexAcpxRuntime(options, {
       createRegistry: () => registry(), createStore: () => store(), createRuntime: value => { created = value; return runtime; },
     });
+    const sessionOptions = vi.mocked(runtime.ensureSession).mock.calls[0]?.[0].sessionOptions;
+    if (agent === "claude") expect(sessionOptions?.allowedTools).toEqual(["mcp__paperclip_runner_fixture__*"]);
+    else expect(sessionOptions?.allowedTools).toBeUndefined();
     expect(created.nonInteractivePermissions).toBe("deny");
     expect(created.permissionPolicy).toMatchObject({ defaultAction: "deny", autoApprove: undefined, escalate: undefined });
     expect(created.spawnEnvironment!().PAPERCLIP_ACPX_ISOLATED_CONTEXT).toBeUndefined();
