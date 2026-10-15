@@ -1231,6 +1231,7 @@ export interface CapabilityRunnerdProcessEvidence {
 export interface CapabilityRunnerdCodexTransportOptions extends RunnerExecutionDriver {
   provider?: "codex" | "opencode" | "claude_managed" | "aws_agentcore" | "acpx";
   observeCredentials?: boolean;
+  onCredentialsUpdated?: (event: PrpEvent) => Promise<void>;
   opencodePermissionMode?: NativeOpenCodePermissionMode;
   acpxAgent?: QualifiedAcpxAgent;
   /** Explicit evaluation-only candidate selection, never derived from persisted session input. */
@@ -4723,6 +4724,11 @@ class DurablePrpCodexTransport implements CodexAppServerTransport {
       expectedRunnerDigest: runnerArtifact.digest,
       onProtocolIntegrityError: (error) => this.#failTransport(error),
       onSemanticToolInput: (call) => this.#handleSemanticToolInput(call),
+      onCommittedEvent: async (event) => {
+        if (event.eventType === "auth.credentials.updated") {
+          await this.options.onCredentialsUpdated?.(event);
+        }
+      },
       connectionLeaseTtlMs: 60 * 60 * 1_000,
     });
     this.#core = core;
@@ -5461,6 +5467,11 @@ class DurablePrpCodexTransport implements CodexAppServerTransport {
       expectedRunnerDigest: runnerArtifact.digest,
       onProtocolIntegrityError: (error) => this.#failTransport(error),
       onSemanticToolInput: (call) => this.#handleSemanticToolInput(call),
+      onCommittedEvent: async (event) => {
+        if (event.eventType === "auth.credentials.updated") {
+          await this.options.onCredentialsUpdated?.(event);
+        }
+      },
       ...(warmRecovery
         ? {
             beforeAuthenticatedConnection: async (admission) => {
@@ -6341,6 +6352,7 @@ class DurablePrpCodexTransport implements CodexAppServerTransport {
       // full, new events replace its prefix without increasing its length.
       if (fromDeferredQueue) this.#deferredTurnStartEvents.shift();
       else this.#eventSourceSeq = event.sourceSeq;
+      if (event.eventType === "auth.credentials.updated" && this.options.onCredentialsUpdated) continue;
       if (
         event.eventType === "harness.ready" ||
         event.eventType === "session.started" ||

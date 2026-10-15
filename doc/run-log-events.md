@@ -22,8 +22,12 @@ They also become native Observability spans only with an operator OTLP endpoint.
 ## Native PRP Run-Log Events
 
 `auth.credentials.updated` is a runner-produced PRP event for a change to a
-supported credential store. The native coordinator stores it through the same
-PRP append path before it acknowledges delivery. Its payload contains only a
+supported credential store. The bundled transport awaits a host commit callback
+before acknowledging delivery, including during warm idle and provider cleanup.
+The callback writes directly to the bound run through the shared run-log writer.
+Its separate credential source namespace avoids collisions with driver-normalized
+source sequences and deduplicates retries using the original PRP event identity.
+The original envelope is retained in `prpEvent`. Its payload contains only a
 provider, an opaque binding ID, a revision, and a detection method. It contains
 no credentials, account identity, file path, or credential fingerprint. The
 consumer can use the event to read the updated credentials through its existing

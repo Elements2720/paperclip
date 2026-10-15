@@ -80,6 +80,15 @@ and pending event are persisted together in a private runner state file. Source
 retries retain the same event identity until the durable PRP outbox accepts it.
 Hosts should commit an idempotent reaction or durable work item through
 `onCommittedEvent` before returning and advancing the cumulative ACK.
+The bundled transport exposes `onCredentialsUpdated(event)` for this commit.
+It awaits the callback before ACK, including during warm idle, attachment, and
+provider cleanup. Callback failures leave delivery unacknowledged for retry;
+callbacks must therefore deduplicate by the original source event identity.
+When configured, credential updates bypass the turn notification queue.
+Paperclip commits them directly to the run log in a separate credential source
+namespace, preserving the original PRP envelope and avoiding collisions with
+the driver's normalized event sequence. A turn-only notification consumer
+cannot reliably handle idle or cleanup updates; use this callback instead.
 
 `detection: "credential_store"` reports an observed credential change, not proof
 that an OAuth refresh succeeded. Multiple changes between observations can be
