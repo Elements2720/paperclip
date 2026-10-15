@@ -86,7 +86,9 @@ that an OAuth refresh succeeded. Multiple changes between observations can be
 coalesced; this is not an audit of every refresh exchange. The schema also
 allows `native_hook` for integrations with an explicit signal. Observation
 continues during warm idle and checks at turn terminal and close boundaries,
-including Grok's private refresh handoff after live-store cleanup.
+including Grok's private refresh handoff after live-store cleanup. Retained
+runner observations enter the durable outbox before a suspend or shutdown
+command completes, without draining the provider backlog.
 
 The event authorizes no credential access or write on its own. A host that
 needs rotated token values must use a separately authorized handoff with its

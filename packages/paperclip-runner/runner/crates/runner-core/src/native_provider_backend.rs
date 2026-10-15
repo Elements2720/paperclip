@@ -221,6 +221,10 @@ impl CommandExecutor for NativeProviderCommandExecutor {
             .as_mut()
             .map_or_else(|| Ok(Vec::new()), CommandExecutor::retained_events)
     }
+    fn retained_runner_events(&mut self) -> Result<Vec<PolledEvent>, DurableRunnerError> {
+        self.credentials.restore()?;
+        Ok(self.credentials.pending().into_iter().collect())
+    }
     fn execute(&mut self, command: &Command) -> Result<CommandExecution, DurableRunnerError> {
         self.select_recovery()?;
         if self.selected.is_none()

@@ -83,6 +83,7 @@ fn credential_updates_replay_through_the_native_executor_until_durable_ack() {
     drop(executor);
     let mut resumed = NativeProviderCommandExecutor::with_runner_config(&root, &runner_config);
     assert_eq!(resumed.poll_events().unwrap(), updates);
+    assert_eq!(resumed.retained_runner_events().unwrap(), updates);
     resumed.acknowledge_events(1).unwrap();
     assert!(resumed.poll_events().unwrap().is_empty());
     fs::remove_dir_all(root).unwrap();

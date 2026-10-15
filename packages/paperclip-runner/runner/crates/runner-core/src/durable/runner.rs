@@ -267,6 +267,10 @@ pub trait CommandExecutor {
         Ok(Vec::new())
     }
 
+    fn retained_runner_events(&mut self) -> Result<Vec<PolledEvent>, DurableRunnerError> {
+        Ok(Vec::new())
+    }
+
     /// Returns only already-retained evidence, without polling, restoration,
     /// launch, or provider RPCs. The runner commits and ACKs this FIFO before
     /// recording a command failure or completing an authority attachment.
@@ -1793,6 +1797,13 @@ fn process_command<E: CommandExecutor>(
             return Ok((result, CommandLifecycle::for_terminal(command)));
         }
     };
+    if matches!(
+        command.command_type.as_str(),
+        "runner.suspend" | "runner.shutdown"
+    ) {
+        let events = executor.retained_runner_events()?;
+        commit_executor_events(state, store, config, executor, events)?;
+    }
     if command.command_type == "runner.drain" {
         // An explicit drain must make progress even while control traffic
         // prevents idle polling. Only move one already-retained prefix under
@@ -2013,6 +2024,65 @@ mod tests {
                 return Ok(());
             }
             self.retained.acknowledge_events(count)
+        }
+    }
+
+    #[test]
+    fn terminal_commands_commit_runner_events_without_draining_the_provider() {
+        struct ObserverExecutor {
+            pending: Vec<PolledEvent>,
+            calls: usize,
+        }
+        impl CommandExecutor for ObserverExecutor {
+            fn execute(&mut self, _: &Command) -> Result<CommandExecution, DurableRunnerError> {
+                self.calls += 1;
+                Ok(CommandExecution::result(json!({"status":"completed"})))
+            }
+            fn retained_runner_events(&mut self) -> Result<Vec<PolledEvent>, DurableRunnerError> {
+                Ok(self.pending.clone())
+            }
+            fn retained_events(&mut self) -> Result<Vec<PolledEvent>, DurableRunnerError> {
+                panic!("terminal command must preserve the provider backlog")
+            }
+            fn poll_events(&mut self) -> Result<Vec<PolledEvent>, DurableRunnerError> {
+                panic!("terminal command must not poll or launch a provider")
+            }
+            fn acknowledge_events(&mut self, count: usize) -> Result<(), DurableRunnerError> {
+                assert_eq!(count, 1);
+                self.pending.clear();
+                Ok(())
+            }
+        }
+        for kind in ["runner.suspend", "runner.shutdown"] {
+            let directory = std::env::temp_dir()
+                .join(format!("runner-observer-terminal-{}", uuid::Uuid::new_v4()));
+            let config = config(directory.clone());
+            let store = DurableStateStore::new(&directory).unwrap();
+            let (mut state, _) = store.load_or_create(&config).unwrap();
+            let mut executor = ObserverExecutor {
+                pending: vec![PolledEvent {
+                    executor_event_id: "credential_update_0000000000000001".to_owned(),
+                    event_type: "auth.credentials.updated".to_owned(),
+                    priority: EventPriority::P0,
+                    payload: json!({"schema":"paperclip.auth.credentials.updated.v1", "provider":"codex",
+                    "bindingId":"harness-auth", "revision":1, "detection":"credential_store"}),
+                }],
+                calls: 0,
+            };
+            let command = command(kind);
+            process_command(&mut state, &store, &config, &mut executor, &command).unwrap();
+            assert!(executor.pending.is_empty());
+            let (mut recovered, _) = store.load_or_create(&config).unwrap();
+            assert_eq!(recovered.outbox.len(), 1);
+            assert_eq!(recovered.outbox[0].event_type, "auth.credentials.updated");
+            assert_eq!(
+                recovered.processed_commands[&command.command_id].status,
+                "completed"
+            );
+            process_command(&mut recovered, &store, &config, &mut executor, &command).unwrap();
+            assert_eq!(executor.calls, 1);
+            assert_eq!(recovered.outbox.len(), 1);
+            fs::remove_dir_all(directory).unwrap();
         }
     }
 
