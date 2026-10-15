@@ -351,6 +351,7 @@ describe("openapi routes", () => {
       ].content["application/json"].schema,
     ];
     for (const responseSchema of responseSchemas) {
+      expect(responseSchema.properties.metadata.nullable).toBe(true);
       const authorizationReason =
         responseSchema.properties.metadata.properties.authorizationReason;
       expect(authorizationReason).toMatchObject({

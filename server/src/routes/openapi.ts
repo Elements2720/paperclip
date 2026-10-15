@@ -864,8 +864,10 @@ const issueCommentResponseBaseSchema = z.object({
 const issueCommentResponseSchema = zodToOpenApiSchema(
   issueCommentResponseBaseSchema,
 );
-(issueCommentResponseSchema.properties as Record<string, JsonSchema>).metadata =
-  issueCommentMetadataResponseSchema;
+(issueCommentResponseSchema.properties as Record<string, JsonSchema>).metadata = {
+  ...issueCommentMetadataResponseSchema,
+  nullable: true,
+};
 
 const issueCommentListResponseSchema: JsonSchema = {
   type: "array",
