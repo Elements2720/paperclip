@@ -254,7 +254,7 @@ attempt or owning phase:
 | `workspace.sources.*` | Source inventory queries, canonicalization, one filesystem alias scan, repository scan, and configured project scan. |
 | `workspace.readers`, `workspace.readers.*`, `workspace.access.*` | Retained-reader groups, identity, trust, project and source authorization, privacy and inventory reads. |
 | `workspace.provenance`, `workspace.notification`, `workspace.write` | Preserved ownership, notification statements, and record writes. |
-| `workspace.materialize.*`, `workspace.checkout.*` | Private source-directory setup and identity verification, existing checkout lookup, Git credential resolution, clone, requested-ref checkout, and atomic publication. The enclosing `heartbeat.prepare.workspace_source_materialize` includes the complete source-materialization path. |
+| `workspace.materialize.*`, `workspace.checkout.*` | Private source-directory setup and identity verification, existing checkout lookup, Git credential resolution, clone, optional pristine-object cache lookup/publication (`cache_lookup`, `cache_publish`), requested-ref checkout, and atomic publication. The enclosing `heartbeat.prepare.workspace_source_materialize` includes the complete source-materialization path. |
 | `runtime_selection.*` | Completion contracts, session/recovery reads, profiles, interaction materialization, backend discovery, bootstrap, run/coordinator writes, transaction entry/settlement, and workspace synchronization. |
 | `runtime_context.instructions`, `.skills`, `.mcp` | The three concurrent runtime-context branches. Their durations overlap. |
 | `runtime_context.asset_*` | Source reads, manifest hashing, cache lookup, cold materialization, and exact file verification on cold and warm paths. |

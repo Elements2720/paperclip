@@ -6,7 +6,7 @@ import fs from "node:fs/promises";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import type { TaskWorkspaceIntent } from "@paperclipai/shared";
-import type { GitRemoteAuthProvider } from "./git-credentials.js";
+import { isGitHubHttpsRemoteUrl, type GitRemoteAuthProvider } from "./git-credentials.js";
 import { resolvePaperclipInstanceRoot } from "../home-paths.js";
 import { materializeManagedProjectWorkspace } from "./managed-repository-checkout.js";
 import { measureRunPhase } from "./execution-preparation-timing.js";
@@ -139,6 +139,8 @@ export async function materializeIsolatedRemoteWorkspaceSource(input: {
   });
   const result = await materializeManagedProjectWorkspace(canonicalCwd, {
     repoUrl: input.repoUrl, resolveGitAuth: input.resolveGitAuth,
+    objectCacheCompanyDirectory: isGitHubHttpsRemoteUrl(input.repoUrl)
+      ? path.join(await fs.realpath(resolvePaperclipInstanceRoot()), "repository-object-cache", input.companyId) : undefined,
   });
   if (result.warning) throw new Error("Isolated repository source is not a Git checkout");
   await measureRunPhase("workspace.materialize.source_identity", () => assertRemoteSourceIdentity(cwd, input.repoUrl));

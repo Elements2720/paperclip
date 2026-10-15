@@ -686,6 +686,35 @@ per-query results and latency measurements; scale measurements are opt-in.
 
 ### Repository workspace admission benchmark
 
+Measure a fresh checkout with and without the repository object cache:
+
+```sh
+pnpm --filter @paperclipai/server exec tsx ../scripts/benchmark-repository-object-cache.ts
+```
+
+This uses a synthetic 32 MiB repository and the real `file://` Git transport.
+It reports cache priming separately, then alternates five fresh checkouts per
+mode. Git's pack trace records received bytes. Each checkout has independent
+objects and passes `git fsck`. There is no injected latency or hosted network
+measurement.
+
+Measure cold sandbox staging with a disposable 10,000-file Git repository:
+
+```sh
+pnpm --filter @paperclipai/server exec tsx ../scripts/benchmark-workspace-staging.ts --baseline-ref=origin/master
+pnpm --filter @paperclipai/server exec tsx ../scripts/benchmark-workspace-staging.ts --baseline-ref=origin/master --transfer-delay-ms=3000
+```
+
+The benchmark alternates the baseline and current implementations. Both pack,
+verify, copy and extract real archives, then compare the resulting tree and Git
+HEAD. It retains dirty, deleted and untracked-file semantics and excludes ignored
+files. The transport is a local copy. The optional delay models a slow transfer;
+it does not measure hosted network or agent latency. The report contains every
+sample, whole-staging wall time, archive bytes and phase durations. Seed
+verification and upload can overlap, so do not sum their durations. The script
+temporarily imports baseline source beside the current source and removes it on
+exit. Run without other repository edits or heavy I/O for a useful comparison.
+
 Measure the real repository preparation service with a disposable embedded
 PostgreSQL database and synthetic history, without invoking an agent:
 
@@ -1103,6 +1132,35 @@ Agent, project, environment, secret, skill, and workspace config edits are sampl
 When effective run config changes, Paperclip may intentionally skip a saved adapter session, refresh persisted workspace runtime config, replace a reused execution workspace, or avoid reusing a sandbox/environment lease. Fresh execution can lose adapter-specific session, workspace, or sandbox state; correctness of the next run's config takes priority over continuity. Plain environment values affect freshness through value hashes; run result JSON and workspace operation logs expose only the non-sensitive freshness decision categories, without storing secret values, full env maps, provider credentials, or private path details.
 
 An explicit `reuse_existing` Git workspace keeps its recorded source repository, including after its project-workspace row is deleted or the project primary changes. The server verifies the original company, project, repository origin, and worktree registration before reuse. It does not attach a deleted association to the new primary. A conflicting explicit project-workspace selection, missing source identity, or an unverified legacy local checkout blocks the run. Restore the original source. Before intentionally clearing the existing-workspace binding to choose a new repository, review and preserve its retained work. Missing worktrees may be reconstructed only from the verified original source; current project defaults are not a fallback.
+
+### Isolated repository object cache
+
+Fresh task-private GitHub HTTPS sources use a pristine upstream object cache at
+`<instance root>/repository-object-cache/<company>/<opaque scope>`. The scope
+includes the repository URL and current credential fingerprint. Credentials
+are not stored in the cache. Other remote providers retain the ordinary clone
+path. Existing task sources and local dirty source copies keep their current
+behavior.
+
+Every new checkout still contacts the remote with current Git credentials.
+`git clone --reference-if-able --dissociate` reuses objects but selects the
+remote's current refs and creates independent storage. An unavailable or denied
+remote cannot fall back to cached files. A failed reference clone retries once
+without the cache and resolves credentials again. Task commits and dirty files
+never populate this cache. Restore continues to use a fresh upstream object
+store for its independent authorization proof.
+
+Cache publication is optional and never waits for another publisher. It keeps
+at most 64 entries and 4 GiB per company, with 2 GiB per entry. Temporary cache
+construction can use one additional entry's space; the existing manifest free
+space reserve applies. Priming uses a five-second cooperative work budget and
+a 4,096-entry scan allowance; individual filesystem calls and cleanup can
+exceed that time. Existing entries and abandoned pending entries count
+against capacity. A full, corrupt or unavailable cache leaves ordinary cloning
+available. No cache eviction is performed. Credential rotation selects another
+scope and can reduce reuse after capacity is exhausted. There is no link from
+an admitted task checkout back to this cache, so cache removal cannot remove
+task Git objects.
 
 ## Workspace Git Scan Protection
 

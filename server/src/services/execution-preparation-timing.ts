@@ -43,6 +43,7 @@ export type ExecutionPhase =
   | "workspace.materialize.directories" | "workspace.materialize.source_identity"
   | "workspace.checkout.lookup" | "workspace.checkout.git_auth" | "workspace.checkout.git_clone"
   | "workspace.checkout.git_ref" | "workspace.checkout.publish"
+  | "workspace.checkout.cache_lookup" | "workspace.checkout.cache_publish"
   | "runtime_selection.review" | "runtime_selection.contract_read" | "runtime_selection.contract_ensure"
   | "runtime_selection.resume" | "runtime_selection.recovery_profile" | "runtime_selection.profile" | "runtime_selection.interactions"
   | "runtime_selection.provider_discovery" | "runtime_selection.bootstrap" | "runtime_selection.run_write" | "runtime_selection.finalization_write"

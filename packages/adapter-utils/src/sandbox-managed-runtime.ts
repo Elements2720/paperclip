@@ -1640,38 +1640,43 @@ export async function prepareSandboxManagedRuntime(input: {
             workspaceUploadBytes += (await fs.stat(workspaceTarPath)).size;
           });
 
-          if (seedGeneration && !cachedSeed && input.workspaceDurableSeed) {
-            const seed = input.workspaceDurableSeed;
-            await runStepSpan("workspace.seed_publish", () => publishWorkspaceSeedGeneration(input.workspaceSeedCacheDirectory!, seedGeneration,
-              { ...seed, gitArchivePath: gitSnapshot || repositories.length ? seed.gitArchivePath : null }, {
-                companyDirectory: input.workspaceSeedCacheCompanyDirectory,
-                verify: () => runStepSpan("seed.verify", async () => {
-                  const verifiedRoot = path.join(tempDir, "verify-seed");
-                  try {
-                    if (gitSnapshot || repositories.length) await runStepSpan("workspace.seed_extract", () => extractTarballToDirectory({ archivePath: path.join(tempDir, "git-workspace.tar"), localDir: verifiedRoot }));
-                    await runStepSpan("workspace.seed_extract", () => extractTarballToDirectory({ archivePath: path.join(tempDir, "workspace.tar"), localDir: verifiedRoot, exclude: repositoryMetadataExcludes }));
-                    for (const relative of workspacePaths(deletedPaths)) {
-                      let parent = verifiedRoot;
-                      for (const segment of relative.split("/").slice(0, -1)) {
-                        parent = path.join(parent, segment);
-                        const stat = await fs.lstat(parent).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return null; throw error; });
-                        if (stat && !stat.isDirectory()) return false;
+          const publishSeed = async () => {
+            if (seedGeneration && !cachedSeed && input.workspaceDurableSeed) {
+              const seed = input.workspaceDurableSeed;
+              await runStepSpan("workspace.seed_publish", () => publishWorkspaceSeedGeneration(input.workspaceSeedCacheDirectory!, seedGeneration,
+                { ...seed, gitArchivePath: gitSnapshot || repositories.length ? seed.gitArchivePath : null }, {
+                  companyDirectory: input.workspaceSeedCacheCompanyDirectory,
+                  verify: () => runStepSpan("seed.verify", async () => {
+                    const verifiedRoot = path.join(tempDir, "verify-seed");
+                    try {
+                      if (gitSnapshot || repositories.length) await runStepSpan("workspace.seed_extract", () => extractTarballToDirectory({ archivePath: path.join(tempDir, "git-workspace.tar"), localDir: verifiedRoot }));
+                      await runStepSpan("workspace.seed_extract", () => extractTarballToDirectory({ archivePath: path.join(tempDir, "workspace.tar"), localDir: verifiedRoot, exclude: repositoryMetadataExcludes }));
+                      for (const relative of workspacePaths(deletedPaths)) {
+                        let parent = verifiedRoot;
+                        for (const segment of relative.split("/").slice(0, -1)) {
+                          parent = path.join(parent, segment);
+                          const stat = await fs.lstat(parent).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return null; throw error; });
+                          if (stat && !stat.isDirectory()) return false;
+                        }
+                        await fs.rm(path.join(verifiedRoot, relative), { recursive: true, force: true });
                       }
-                      await fs.rm(path.join(verifiedRoot, relative), { recursive: true, force: true });
-                    }
-                    const verified = await runStepSpan("workspace.seed_snapshot", () => captureWorkspaceSnapshot(verifiedRoot, { exclude: baselineSnapshot!.exclude, ignoredPaths: baselineSnapshot!.ignoredPaths, diskBacked: true }));
-                    try { return directorySnapshotSha256(verified) === directorySnapshotSha256(baselineSnapshot!); }
-                    finally { await disposeDirectorySnapshot(verified); }
-                  } finally { await runStepSpan("workspace.seed_cleanup", () => fs.rm(verifiedRoot, { recursive: true, force: true })); }
-                }),
-              }));
+                      const verified = await runStepSpan("workspace.seed_snapshot", () => captureWorkspaceSnapshot(verifiedRoot, { exclude: baselineSnapshot!.exclude, ignoredPaths: baselineSnapshot!.ignoredPaths, diskBacked: true }));
+                      try { return directorySnapshotSha256(verified) === directorySnapshotSha256(baselineSnapshot!); }
+                      finally { await disposeDirectorySnapshot(verified); }
+                    } finally { await runStepSpan("workspace.seed_cleanup", () => fs.rm(verifiedRoot, { recursive: true, force: true })); }
+                  }),
+                }));
+            }
+          };
+          if (!stageWorkspace) {
+            await publishSeed();
+            return;
           }
-          if (!stageWorkspace) return;
 
           // One confined `syncIn` for the whole merged workspace file set. The confine
           // guard covers every mapping BEFORE any bytes upload (fail-closed): a source
           // or target escape in EITHER tar mapping stops the upload of both.
-          await stageConfinedSyncIn({
+          const staging = stageConfinedSyncIn({
             files: workspaceFiles,
             postUploadCommands: workspacePostUploadCommands,
             sourceRoots: [tempDir],
@@ -1680,6 +1685,8 @@ export async function prepareSandboxManagedRuntime(input: {
             statusPhase: "config_sync",
             progressBytes: workspaceUploadBytes,
           });
+          const [staged] = await Promise.allSettled([staging, publishSeed()]);
+          if (staged.status === "rejected") throw staged.reason;
         }),
       );
     }

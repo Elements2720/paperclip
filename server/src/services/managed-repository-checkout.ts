@@ -9,6 +9,7 @@ import { describeGitAuthFailure, scrubGitCredentialText, type GitRemoteAuthProvi
 import { classifyGitCloneFailure, GitConnectionFailureError, readGitConnectionFailure } from "./git-connection-failure.js";
 import { isWorkspaceGitScanError, WorkspaceGitScanError } from "./workspace-git-operation-scheduler.js";
 import { measureRunPhase } from "./execution-preparation-timing.js";
+import { resolveRepositoryObjectCache, readRepositoryObjectCache, publishRepositoryObjectCache } from "./repository-object-cache.js";
 
 const execFile = promisify(execFileCallback);
 const MANAGED_WORKSPACE_GIT_CLONE_TIMEOUT_MS = 10 * 60 * 1000;
@@ -23,6 +24,7 @@ export async function materializeManagedProjectWorkspace(
     beforeCopy?: (cloneCwd: string) => Promise<void>;
     beforePublish?: (cloneCwd: string) => Promise<void>;
     stagingParent?: string;
+    objectCacheCompanyDirectory?: string;
   },
 ): Promise<{ cwd: string; warning: string | null }> {
   await fs.mkdir(path.dirname(cwd), { recursive: true });
@@ -55,19 +57,22 @@ export async function materializeManagedProjectWorkspace(
     await fs.rm(cwd, { recursive: true, force: true });
   }
 
-  const auth = input.resolveGitAuth && !input.localSource
+  let auth = input.resolveGitAuth && !input.localSource
     ? await measureRunPhase("workspace.checkout.git_auth", () => input.resolveGitAuth!(input.repoUrl!))
     : null;
   const cloneTmpDir = await fs.mkdtemp(input.stagingParent
     ? path.join(input.stagingParent, `${path.basename(cwd)}.clone-`)
     : `${cwd}.clone-`);
   const cloneSource = input.localSource ?? input.repoUrl;
+  let objectCache = input.objectCacheCompanyDirectory && !input.localSource
+    ? await measureRunPhase("workspace.checkout.cache_lookup", () => resolveRepositoryObjectCache(input.objectCacheCompanyDirectory!, input.repoUrl!, auth)) : null;
+  const reference = objectCache ? await measureRunPhase("workspace.checkout.cache_lookup", () => readRepositoryObjectCache(objectCache!)) : null;
   try {
     await input.beforeCopy?.(cloneTmpDir);
     try {
-      await measureRunPhase("workspace.checkout.git_clone", () => execFile(
+      const clone = (referencePath: string | null) => measureRunPhase("workspace.checkout.git_clone", () => execFile(
         "git",
-        [...(auth?.configArgs ?? []), "clone", "--no-hardlinks", "--", cloneSource, cloneTmpDir],
+        [...(auth?.configArgs ?? []), "clone", "--no-hardlinks", ...(referencePath ? ["--reference-if-able", referencePath, "--dissociate"] : []), "--", cloneSource, cloneTmpDir],
         {
           env: {
             ...sanitizeRuntimeServiceBaseEnv(process.env),
@@ -77,6 +82,14 @@ export async function materializeManagedProjectWorkspace(
           timeout: MANAGED_WORKSPACE_GIT_CLONE_TIMEOUT_MS,
         },
       ));
+      try { await clone(reference); }
+      catch (error) {
+        if (!reference) throw error;
+        for (const name of await fs.readdir(cloneTmpDir)) await fs.rm(path.join(cloneTmpDir, name), { recursive: true, force: true });
+        objectCache = null;
+        auth = input.resolveGitAuth ? await input.resolveGitAuth(input.repoUrl) : null;
+        await clone(null);
+      }
     } catch (error) {
       const connectionFailure = !input.localSource ? classifyGitCloneFailure(input.repoUrl, error) : null;
       if (connectionFailure) throw new GitConnectionFailureError(
@@ -84,6 +97,7 @@ export async function materializeManagedProjectWorkspace(
       );
       throw error;
     }
+    if (objectCache && !reference) await measureRunPhase("workspace.checkout.cache_publish", () => publishRepositoryObjectCache(objectCache!, cloneTmpDir));
     if (input.localSource) {
       const snapshot = await readGitWorkspaceSnapshot(input.localSource, false);
       if (!snapshot) throw new Error("Configured repository folder is not a Git checkout");
