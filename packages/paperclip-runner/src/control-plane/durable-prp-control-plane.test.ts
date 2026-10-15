@@ -85,6 +85,57 @@ it("commits credential updates before ACK and preserves replay identity", async 
   }
 });
 
+it.each(["success", "integrity_failure"] as const)("ignores a replaced connection's late credential commit %s", async outcome => {
+  const root = mkdtempSync(resolve(tmpdir(), "runner-credential-reconnect-"));
+  let release!: () => void;
+  const barrier = new Promise<void>(resolveCommit => { release = resolveCommit; });
+  let first = true;
+  const commits = vi.fn(async () => {
+    if (!first) return;
+    first = false;
+    await barrier;
+    if (outcome === "integrity_failure") throw new NativeSessionProtocolIntegrityError("source_event_replay_conflict");
+  });
+  const onProtocolIntegrityError = vi.fn();
+  const core = new DurablePrpControlPlane({ stateDirectory: root, identity,
+    expectedRunnerVersion, expectedRunnerDigest, onCommittedEvent: commits, onProtocolIntegrityError });
+  const frame = (seq: number) => {
+    const envelope = semanticInputEvent(seq);
+    const event = envelope.payload as Record<string, unknown>;
+    event.sourceEventId = `credential-reconnect-${seq}`;
+    event.eventType = "auth.credentials.updated";
+    event.payload = { schema: "paperclip.auth.credentials.updated.v1", provider: "codex",
+      bindingId: "harness-auth", revision: seq, detection: "credential_store" };
+    return envelope;
+  };
+  try {
+    await core.start();
+    const old = (await authenticate(core, core.issueBootstrapTicket()))!;
+    sendSecure(old, frame(1));
+    await vi.waitFor(() => expect(commits).toHaveBeenCalledTimes(1));
+    const replacement = (await authenticate(core, old.leaseToken!))!;
+    for (const seq of [1, 2]) {
+      sendSecure(replacement, frame(seq));
+      expect(await receiveSecure(replacement)).toMatchObject({ kind: "ack", payload: { ackedSourceSeq: seq } });
+    }
+    release();
+    await new Promise<void>(resolveTurn => setImmediate(resolveTurn));
+    expect(core.store.state.ackedSourceSeq).toBe(2);
+    expect(core.store.state.committedEvents.map(event => event.sourceSeq)).toEqual([1, 2]);
+    expect(onProtocolIntegrityError).not.toHaveBeenCalled();
+    sendSecure(replacement, frame(3));
+    expect(await receiveSecure(replacement)).toMatchObject({ kind: "ack", payload: { ackedSourceSeq: 3 } });
+    const saved = JSON.parse(readFileSync(core.store.path, "utf8"));
+    expect(saved.ackedSourceSeq).toBe(3);
+    expect(saved.committedEvents.map((event: { sourceSeq: number }) => event.sourceSeq)).toEqual([1, 2, 3]);
+    replacement.socket.destroy();
+  } finally {
+    release();
+    await core.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 function renewalRequest(client: AuthenticatedClient, expiresAt: number): Record<string, unknown> {
   return {
     protocol: "paperclip.runner", version: client.welcome.version,
