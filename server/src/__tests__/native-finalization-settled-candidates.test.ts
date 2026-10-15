@@ -126,28 +126,44 @@ describeEmbeddedPostgres("native finalization candidate selection", () => {
     ]);
   });
 
-  it("keeps committed rows that finished within the grace window or have not finished", async () => {
-    await committedRun({ finishedAgoMs: 10 * 60 * 1000 });
-    await committedRun({ status: "running", finishedAgoMs: null });
-    await committedRun({ status: "succeeded", finishedAgoMs: null });
+  // More settled rows than one upkeep page, so the page is full and a
+  // protected row can only be a candidate through its own protection.
+  async function fillUpkeepPage() {
+    for (let index = 0; index < NATIVE_SETTLED_COMMITTED_UPKEEP_PER_PASS + 2; index++) await committedRun();
+  }
 
-    expect(await candidateCount(reconcileNativeFinalizations(db))).toBe(3);
+  it("keeps committed rows that finished within the grace window or have not finished", async () => {
+    await fillUpkeepPage();
+    const protectedRows = 12;
+    for (let index = 0; index < protectedRows; index++) {
+      const variant = index % 3;
+      if (variant === 0) await committedRun({ finishedAgoMs: 10 * 60 * 1000 });
+      else if (variant === 1) await committedRun({ status: "running", finishedAgoMs: null });
+      else await committedRun({ status: "succeeded", finishedAgoMs: null });
+    }
+
+    expect(await candidateCount(reconcileNativeFinalizations(db)))
+      .toBe(NATIVE_SETTLED_COMMITTED_UPKEEP_PER_PASS + protectedRows);
   });
 
-  it("keeps a settled committed row whose decision has an undelivered effect", async () => {
-    const decisionId = randomUUID();
-    await committedRun({ decisionId });
-    // As above, the decision row is not created; foreign-key triggers are off.
-    await db.transaction(async (tx) => {
-      await tx.execute(sql`set local session_replication_role = replica`);
-      await tx.insert(statusDecisionEffects).values({
-        companyId, issueId, decisionId, ordinal: 0, effectKind: "wake", targetType: "agent",
-        idempotencyKey: randomUUID(), payload: {}, deliveryState: "failed",
+  it("keeps settled committed rows whose decision has an undelivered effect", async () => {
+    await fillUpkeepPage();
+    const protectedRows = 12;
+    for (let index = 0; index < protectedRows; index++) {
+      const decisionId = randomUUID();
+      await committedRun({ decisionId });
+      // As above, the decision row is not created; foreign-key triggers are off.
+      await db.transaction(async (tx) => {
+        await tx.execute(sql`set local session_replication_role = replica`);
+        await tx.insert(statusDecisionEffects).values({
+          companyId, issueId, decisionId, ordinal: 0, effectKind: "wake", targetType: "agent",
+          idempotencyKey: randomUUID(), payload: {}, deliveryState: index % 2 === 0 ? "failed" : "pending",
+        });
       });
-    });
-    // A pending effect keeps it a candidate; the upkeep page is empty because
-    // the row is not settled.
-    expect(await candidateCount(reconcileNativeFinalizations(db))).toBe(1);
+    }
+
+    expect(await candidateCount(reconcileNativeFinalizations(db)))
+      .toBe(NATIVE_SETTLED_COMMITTED_UPKEEP_PER_PASS + protectedRows);
   });
 
   it("reconciles a settled row when a pass names it explicitly", async () => {
