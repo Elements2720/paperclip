@@ -102,6 +102,17 @@ describe("NativeExecutionInputV1", () => {
       }],
       mcp: { assignmentSetId: "sha256:test", digest, bindingId: "native-mcp:run-1" },
     } as const;
+    const preconfigured = {
+      ...input, schema: "paperclip.native-execution-input.v7", homeMode: "preconfigured",
+      provider: { kind: "codex", model: null, approvalPolicy: "never" },
+      executionMode: "default", planningContext: null,
+      runtimeContext: { ...context, aggregateDigest: canonicalNativeRuntimeContextDigest(context) },
+    };
+    expect(parseNativeExecutionInput(preconfigured)).toMatchObject({ homeMode: "preconfigured" });
+    expect(buildNativeModelEnvelope(parseNativeExecutionInput(preconfigured)).schema).toBe("paperclip.native-model-envelope.v3");
+    expect(() => parseNativeExecutionInput({ ...preconfigured, homeMode: "other" })).toThrow("homeMode");
+    expect(() => parseNativeExecutionInput({ ...preconfigured, provider: { kind: "opencode", model: "provider/model", permissionMode: "allow" } })).toThrow("supports Codex");
+    expect(() => parseNativeExecutionInput({ ...preconfigured, schema: "paperclip.native-execution-input.v5" })).toThrow("homeMode");
     const parsed = parseNativeExecutionInput({
       ...input,
       schema: "paperclip.native-execution-input.v3",

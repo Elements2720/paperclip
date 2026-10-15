@@ -47,6 +47,27 @@ describe("Codex ACPX runtime adapter", () => {
       await port.close({ reason: "test complete" });
     }
   });
+  it.each(["claude", "codex"] as const)("rejects approvals without a workflow in preconfigured %s sessions", async (agent) => {
+    const runtime = fakeRuntime();
+    runtime.setMode = vi.fn().mockResolvedValue(undefined);
+    let created!: AcpRuntimeOptions;
+    const options = openOptions(fakeCommand());
+    options.profile = { ...options.profile, agent };
+    options.permissionMode = "approve-all";
+    options.launchEnvironment = { HOME: "/users/executor", PAPERCLIP_RUNNER_HOME_MODE: "preconfigured" };
+    const port = await openCodexAcpxRuntime(options, {
+      createRegistry: () => registry(), createStore: () => store(), createRuntime: value => { created = value; return runtime; },
+    });
+    expect(created.nonInteractivePermissions).toBe("deny");
+    expect(created.permissionPolicy).toMatchObject({ defaultAction: "deny", autoApprove: undefined, escalate: undefined });
+    expect(created.spawnEnvironment!().PAPERCLIP_ACPX_ISOLATED_CONTEXT).toBeUndefined();
+    await expect(created.onPermissionRequest!({ sessionId: "backend-1", raw: {}, inferredKind: "execute" } as never,
+      { signal: new AbortController().signal })).resolves.toEqual({ outcome: "reject_once" });
+    if (agent === "codex") expect(runtime.setMode).toHaveBeenCalledWith({ handle: HANDLE, mode: "agent-full-access" });
+    else expect(runtime.setMode).not.toHaveBeenCalled();
+    await port.close({ reason: "verified" });
+  });
+
   it("rejects forged permission session identifiers before delegating or applying full-auto policy", async () => {
     const pending = pendingExtensionTurn("turn-1");
     const runtime = fakeRuntime(); vi.mocked(runtime.startTurn).mockReturnValue(pending.turn);

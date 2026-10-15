@@ -251,10 +251,12 @@ export async function resolveNativeRuntimeMcpSnapshot(input: { db: Db; agent: Pi
 }
 
 export async function buildNativeRuntimeContext(input: { db: Db; agent: RuntimeAgent; runId: string; runtimeConfig: Record<string, unknown>; runtimeSkillEntries: PaperclipSkillEntry[]; instructionWorkingCopy?: { rootPath: string; entryPath: string; kind?: "agent_files" } }): Promise<NativeRuntimeContextSnapshot> {
+  const preconfigured = input.runtimeConfig.homeMode === "preconfigured";
+  const emptyMcpDigest = sha256("preconfigured");
   const [instructions, skills, mcp] = await Promise.all([
     measureRunPhase("runtime_context.instructions", () => materializeInstructionBundle(input.db, input.agent, input.instructionWorkingCopy?.kind === "agent_files")),
-    measureRunPhase("runtime_context.skills", () => materializeSelectedSkills(input.runtimeConfig, input.runtimeSkillEntries, input.agent.adapterType === "paperclip_runner")),
-    measureRunPhase("runtime_context.mcp", () => resolveNativeRuntimeMcpSnapshot({ db: input.db, agent: input.agent, runId: input.runId })),
+    measureRunPhase("runtime_context.skills", () => preconfigured ? [] : materializeSelectedSkills(input.runtimeConfig, input.runtimeSkillEntries, input.agent.adapterType === "paperclip_runner")),
+    measureRunPhase("runtime_context.mcp", () => preconfigured ? { assignmentSetId: `sha256:${emptyMcpDigest}`, digest: emptyMcpDigest, bindingId: null } : resolveNativeRuntimeMcpSnapshot({ db: input.db, agent: input.agent, runId: input.runId })),
   ]);
   const snapshot = {
     prompt: { revision: PAPERCLIP_EXECUTION_PROMPT_REVISION, text: PAPERCLIP_EXECUTION_PROMPT, digest: nativeRuntimePromptDigest() },

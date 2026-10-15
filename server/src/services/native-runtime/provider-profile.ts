@@ -77,6 +77,7 @@ export type PaperclipRunnerNativeProviderInput =
   | {
       provider: "codex";
       model: string | null;
+      homeMode?: "isolated" | "preconfigured";
       codexApprovalPolicy: "never" | "on-request" | "untrusted";
       codexReasoningEffort?: string;
     }
@@ -129,6 +130,7 @@ export type PaperclipRunnerNativeProviderInput =
       provider: "acpx";
       model: string;
       acpxAgent: AdmittedPaperclipRunnerAcpxAgent;
+      homeMode?: "isolated" | "preconfigured";
       acpxPermissionMode: "approve-all" | "approve-paperclip" | "approve-reads" | "deny-all";
       acpxSessionMode?: "agent" | "plan" | "ask";
       piThinkingLevel?: "off" | "low" | "high" | "max";
@@ -564,6 +566,13 @@ export function resolvePaperclipRunnerNativeProviderInput(input: {
 }): PaperclipRunnerNativeProviderInput {
   const config = asRecord(input.adapterConfig);
   const profile = resolvePaperclipRunnerProviderProfile(config);
+  if (config.homeMode !== undefined && config.homeMode !== "isolated" && config.homeMode !== "preconfigured") {
+    throw new PaperclipRunnerProviderProfileError("paperclip_runner_home_mode_invalid", "homeMode must be isolated or preconfigured");
+  }
+  const preconfigured = config.homeMode === "preconfigured";
+  if (preconfigured && profile.provider !== "codex" && !(profile.provider === "acpx" && ["claude", "codex"].includes(profile.acpxAgent))) {
+    throw new PaperclipRunnerProviderProfileError("paperclip_runner_home_mode_unsupported", "Preconfigured home supports Codex and ACPX Claude/Codex only");
+  }
   if (profile.backend !== input.backend) {
     throw new PaperclipRunnerProviderProfileError(
       "paperclip_runner_provider_changed",
@@ -597,6 +606,7 @@ export function resolvePaperclipRunnerNativeProviderInput(input: {
       ...(profile.acpxAgent === "cursor" ? {
         acpxSessionMode: resolvePaperclipRunnerCursorMode("acpx", "cursor", config.acpxSessionMode),
       } : {}),
+      ...(preconfigured ? { homeMode: "preconfigured" as const } : {}),
       acpxPermissionMode: resolvePaperclipRunnerPermissionMode(
         "acpx",
         config.acpxPermissionMode,
@@ -769,6 +779,7 @@ export function resolvePaperclipRunnerNativeProviderInput(input: {
   return {
     provider: "codex",
     model: compatibleCodexModel(profile.model, input.codexCliVersion ?? null),
+    ...(preconfigured ? { homeMode: "preconfigured" as const } : {}),
     codexApprovalPolicy: resolvePaperclipRunnerPermissionMode(
       "codex",
       config.codexPermissionMode,

@@ -103,6 +103,28 @@ describePostgres("heartbeat execution configuration through adapter dispatch", (
     return { finished, input: captured.get(run!.id) };
   }
 
+  it("dispatches preconfigured Runner preparation without acquiring managed auth or materializing assigned skills", async () => {
+    const f = await seed(true);
+    await db.update(agents).set({ adapterType: "paperclip_runner", adapterConfig: {
+      provider: "codex", model: "gpt-6.1-sol", homeMode: "preconfigured", cwd: home,
+    } }).where(eq(agents.id, f.agentId));
+    skillFailures.set(f.companyId, "Preconfigured mode must not resolve assigned skills");
+    const prepare = vi.spyOn(aiRuntime, "prepareManagedAiRuntime");
+    const beforeNative = vi.fn(async () => { throw new Error("fixture stopped before provider start"); });
+    const nativeHeartbeat = heartbeatService(db, { beforeNativeRuntimeSelection: beforeNative });
+    try {
+      const run = await nativeHeartbeat.wakeup(f.agentId, { source: "on_demand", triggerDetail: "manual", reason: "manual",
+        payload: { issueId: f.issueId }, contextSnapshot: { issueId: f.issueId } });
+      expect(run).not.toBeNull();
+      await nativeHeartbeat.drainActiveRunExecutions();
+      const saved = await nativeHeartbeat.getRun(run!.id);
+      expect(saved?.error).toContain("fixture stopped before provider start");
+      expect(beforeNative).toHaveBeenCalledOnce();
+      expect(prepare).not.toHaveBeenCalled();
+      expect(saved?.contextSnapshot?.aiConnection).toBeUndefined();
+    } finally { await nativeHeartbeat.drainActiveRunExecutions(); }
+  });
+
   it("applies project environment and issue overrides and replaces caller-supplied runtime fields", async () => {
     const f = await seed();
     const { finished, input } = await execute(f);

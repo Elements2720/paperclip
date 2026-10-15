@@ -820,6 +820,10 @@ const CODEX_PROVIDER_ENVIRONMENT_KEYS: &[&str] = &[
     "PAPERCLIP_AGENT_KEY_ID",
     "PAPERCLIP_AGENT_PUBLIC_KEY",
     "PAPERCLIP_AGENT_PRIVATE_KEY",
+    "PAPERCLIP_RUNNER_HOME_MODE",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "XDG_CACHE_HOME",
     "CODEX_HOME",
     "OPENAI_API_KEY",
     "CODEX_API_KEY",
@@ -897,7 +901,9 @@ impl CodexProvider {
         observe: &mut dyn FnMut(ProviderStartupObservation) -> Result<(), LocalRunnerError>,
     ) -> Result<Self, LocalRunnerError> {
         config.validate()?;
-        if config.provider == "codex" {
+        if config.provider == "codex"
+            && std::env::var("PAPERCLIP_RUNNER_HOME_MODE").as_deref() != Ok("preconfigured")
+        {
             if let Some(home) = std::env::var_os("CODEX_HOME") {
                 crate::codex_startup_trust::trust_startup_root(
                     Path::new(&home),

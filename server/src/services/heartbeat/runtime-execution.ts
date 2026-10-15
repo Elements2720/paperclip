@@ -496,7 +496,7 @@ export async function executeHeartbeatRuntime(db: Db, input: HeartbeatRuntimeExe
         nativeExecution.runtimeContext.mcp.bindingId
           ? nativeExecution.runtimeContext.mcp.digest
           : null;
-      const nativeMcpServers = await buildPaperclipRuntimeMcpServers({
+      const nativeMcpServers = "homeMode" in nativeExecution && nativeExecution.homeMode === "preconfigured" ? [] : await buildPaperclipRuntimeMcpServers({
         db,
         agent,
         runId: run.id,

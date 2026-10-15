@@ -30,6 +30,22 @@ describe("Paperclip Runner native provider configuration", () => {
     expect(resolvePaperclipRunnerNativeProviderInput({ backend: "codex_app_server",
       adapterConfig: { provider: "codex", model }, codexCliVersion })).toMatchObject({ model });
   });
+  it.each(["codex", "claude"])("admits preconfigured ACPX %s without changing the permission setting", acpxAgent => {
+    expect(resolvePaperclipRunnerNativeProviderInput({ backend: "acpx_runtime",
+      adapterConfig: { provider: "acpx", acpxAgent, model: acpxAgent === "codex" ? "gpt-5.6-sol" : "claude-sonnet-5", homeMode: "preconfigured" },
+    })).toMatchObject({ homeMode: "preconfigured", acpxPermissionMode: "approve-all" });
+  });
+  it("limits the initial mode to qualified Codex and ACPX Claude/Codex providers", () => {
+    expect(resolvePaperclipRunnerNativeProviderInput({ backend: "codex_app_server",
+      adapterConfig: { provider: "codex", homeMode: "preconfigured" },
+    })).toMatchObject({ homeMode: "preconfigured", codexApprovalPolicy: "never" });
+    for (const config of [{ provider: "acpx", acpxAgent: "grok" }, { provider: "opencode", model: "provider/model" }]) {
+      expect(() => resolvePaperclipRunnerNativeProviderInput({ backend: "codex_app_server",
+        adapterConfig: { ...config, homeMode: "preconfigured" },
+      })).toThrow("Preconfigured home supports");
+    }
+  });
+
   it.each([undefined, "approve-all", "approve-paperclip", "approve-reads", "deny-all"])(
     "passes Grok's full-auto default or explicit %s policy to the native runner",
     (acpxPermissionMode) => {

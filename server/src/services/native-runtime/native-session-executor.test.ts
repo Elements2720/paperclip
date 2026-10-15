@@ -1344,7 +1344,7 @@ describe("remote provider pack manifest", () => {
         claude:
           "sha256:9d73d1f0f121fb96cc8badb28c22d5bff02d8582eb2e40360a81c189e1b9422a",
         codex:
-          "sha256:c4538599d1ab767db5dff50934f13bb5ba313a59d9c4a83e993fac4617ea63d3",
+          "sha256:443491f4e814501a5dc47347e4510e84faeec9c9382e2d4e53bfe69386d5aabc",
       },
       artifacts: {
         grokLauncher: { path: "dist/providers/grok/launcher.cjs", sha256: digest(grokLauncher) },
@@ -1554,6 +1554,14 @@ describe("provider pack read diagnostics", () => {
 });
 
 describe("native harness persistence profiles", () => {
+  it("does not back up the external Codex home in preconfigured mode", () => {
+    const execution = { homeMode: "preconfigured", provider: { kind: "codex" }, session: {
+      driverKind: "codex_app_server", normalizedSessionId: "session", protocolVersion: 1,
+      lifecyclePolicy: { mode: "per_turn", idleTimeoutMs: null },
+    } } as unknown as NativeExecutionInputV1;
+    expect(resolveNativeHarnessPersistenceProfile(execution).directories.map(directory => directory.name)).toEqual(["runner"]);
+  });
+
   const profile = (provider: Record<string, unknown>, driverKind: string) =>
     resolveNativeHarnessPersistenceProfile({
       provider,

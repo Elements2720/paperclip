@@ -39,6 +39,7 @@ export type {
   DotBindingSnapshot,
   ExternalProviderPort,
   ExternalProviderOperation,
+  NativeExecutionInputV7,
   NativeCompletionSource,
   NativeCompletionSources,
   NativeInteractionResponseEnvelope,

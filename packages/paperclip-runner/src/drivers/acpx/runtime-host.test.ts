@@ -226,6 +226,31 @@ describe("ACPX runtime host", () => {
     expect(openRuntime).not.toHaveBeenCalled();
   });
 
+  it("shares a preconfigured Codex home across sessions without staging or scrubbing credentials", async () => {
+    const fixture = await hostFixture();
+    const home = join(fixture.root, "user-home");
+    const codexHome = join(home, ".codex");
+    await mkdir(codexHome, { recursive: true });
+    const auth = join(codexHome, "auth.json");
+    await writeFile(auth, '{"user_owned":true}');
+    const stageCredential = vi.fn();
+    const options = { ...fixture.options, agent: "codex" as const, model: "gpt-5.6-sol", permissionMode: "approve-all" as const,
+      environment: { HOME: home, CODEX_HOME: codexHome, PAPERCLIP_RUNNER_HOME_MODE: "preconfigured" } };
+    const opened: AcpxRuntimeHost[] = [];
+    try {
+      for (const normalizedSessionId of ["session-one", "session-two"]) {
+        opened.push(await AcpxRuntimeHost.open({ ...options, normalizedSessionId }, {
+          ...fixture.dependencies({ openRuntime: async () => runtimePort() }), stageCredential,
+        }));
+      }
+      expect(stageCredential).not.toHaveBeenCalled();
+      expect(await readFile(auth, "utf8")).toBe('{"user_owned":true}');
+      await expect(AcpxRuntimeHost.open({ ...options, normalizedSessionId: "session-one" },
+        fixture.dependencies({ openRuntime: async () => runtimePort() }))).rejects.toThrow();
+    } finally { await Promise.all(opened.map(host => host.close({ reason: "verified" }))); }
+    expect(await readFile(auth, "utf8")).toBe('{"user_owned":true}');
+  });
+
   it.each([
     { PAPERCLIP_NATIVE_MCP_NAME: "paperclip-assigned" },
     { PAPERCLIP_NATIVE_MCP_NAME: "paperclip", PAPERCLIP_NATIVE_MCP_URL: "http://127.0.0.1:3211/mcp", PAPERCLIP_NATIVE_MCP_TOKEN: "x".repeat(40) },

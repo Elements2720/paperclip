@@ -745,3 +745,28 @@ fit the compacted bound produces a diagnostic; the event stream continues.
 Tool output and error fields have reserved retention space and size records,
 so large input values cannot consume their output tails or make excerpts look
 complete. A separator split between reads does not count against the frame limit.
+## Preconfigured home
+
+Set `homeMode: "preconfigured"` in a `paperclip_runner` agent's adapter config
+(or the runnerd transport options) to use the execution account's existing home.
+The default is `"isolated"`. The initial supported providers are native Codex
+and ACPX Claude/Codex. Other providers reject this option.
+
+Prepare authentication, skills, and external MCP servers on the execution machine
+before launching. Runner does not install skills, copy or remove credentials, or
+rewrite user configuration in this mode. Runner still supplies the requested
+model, task instructions, and its internal task/completion tools. Local permission
+rules and hooks apply. Execution is unattended: native Codex uses `never`, and
+ACPX rejects requests for approval. If local settings block a task, change them
+and retry. Existing blocked results and failure diagnostics report the outcome;
+a hook that also blocks the reporting tool can leave only a generic diagnostic.
+
+Runner retains private protocol/session state and a fence for each session.
+Different sessions may share the same home. Mode and home bindings fence recovery;
+switching either requires a new session. Backups never include the external home.
+Remote execution discovers the execution account's home on the remote machine
+using `getent`; it does not copy the controller's HOME, XDG paths, or login state.
+The external provider history must still exist to resume a session after a remote
+machine is replaced. Missing history fails recovery rather than importing an
+isolated home. OpenCode and the remaining ACPX profiles require separate
+qualification before this mode can be enabled for them.

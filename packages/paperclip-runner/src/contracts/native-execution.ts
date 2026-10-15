@@ -12,6 +12,8 @@ export const NATIVE_EXECUTION_INPUT_SCHEMA_V3 = "paperclip.native-execution-inpu
 export const NATIVE_EXECUTION_INPUT_SCHEMA_V6 = "paperclip.native-execution-input.v6" as const;
 export const NATIVE_EXECUTION_INPUT_SCHEMA_V4 = "paperclip.native-execution-input.v4" as const;
 export const NATIVE_EXECUTION_INPUT_SCHEMA = "paperclip.native-execution-input.v5" as const;
+export const NATIVE_EXECUTION_INPUT_SCHEMA_V7 = "paperclip.native-execution-input.v7" as const;
+export type NativeHomeMode = "isolated" | "preconfigured";
 export const NATIVE_MODEL_ENVELOPE_SCHEMA_V1 = "paperclip.native-model-envelope.v1" as const;
 export const NATIVE_MODEL_ENVELOPE_SCHEMA_V2 = "paperclip.native-model-envelope.v2" as const;
 export const NATIVE_MODEL_ENVELOPE_SCHEMA = "paperclip.native-model-envelope.v3" as const;
@@ -245,7 +247,12 @@ export interface NativeExecutionInputV6 extends Omit<NativeExecutionInputV5, "sc
   session: Omit<NativeExecutionInputV5["session"], "driverKind"> & { driverKind: "openai_dot_mcp" | "grok_bot_mcp" };
 }
 
-export type NativeExecutionInput = NativeExecutionInputV1 | NativeExecutionInputV2 | NativeExecutionInputV3 | NativeExecutionInputV4 | NativeExecutionInputV5 | NativeExecutionInputV6;
+export interface NativeExecutionInputV7 extends Omit<NativeExecutionInputV5, "schema"> {
+  schema: typeof NATIVE_EXECUTION_INPUT_SCHEMA_V7;
+  homeMode: NativeHomeMode;
+}
+
+export type NativeExecutionInput = NativeExecutionInputV1 | NativeExecutionInputV2 | NativeExecutionInputV3 | NativeExecutionInputV4 | NativeExecutionInputV5 | NativeExecutionInputV6 | NativeExecutionInputV7;
 
 /** The only task data that may enter provider-visible model input. */
 export interface NativeModelEnvelopeV1 {
@@ -373,7 +380,8 @@ function parseExternalNativeExecutionInput(input: Record<string, unknown>): Nati
 export function parseNativeExecutionInput(value: unknown): NativeExecutionInput {
   const input = record(value, "input");
   if (input.schema === NATIVE_EXECUTION_INPUT_SCHEMA_V6) return parseExternalNativeExecutionInput(input);
-  const isV5 = input.schema === NATIVE_EXECUTION_INPUT_SCHEMA;
+  const isV7 = input.schema === NATIVE_EXECUTION_INPUT_SCHEMA_V7;
+  const isV5 = isV7 || input.schema === NATIVE_EXECUTION_INPUT_SCHEMA;
   const isV4 = isV5 || input.schema === NATIVE_EXECUTION_INPUT_SCHEMA_V4;
   const isV3 = isV4 || input.schema === NATIVE_EXECUTION_INPUT_SCHEMA_V3;
   const isV2 = isV3 || input.schema === NATIVE_EXECUTION_INPUT_SCHEMA_V2;
@@ -391,6 +399,7 @@ export function parseNativeExecutionInput(value: unknown): NativeExecutionInput 
     ...(isV3 ? ["runtimeContext"] : []),
     ...(isV4 ? ["continuationPrompt", "initialCommunicationGuidance"] : []),
     ...(isV5 ? ["completionSources"] : []),
+    ...(isV7 ? ["homeMode"] : []),
   ], "input");
   if (!isV2 && input.schema !== NATIVE_EXECUTION_INPUT_SCHEMA_V1) {
     throw new NativeExecutionInputError(
@@ -398,6 +407,16 @@ export function parseNativeExecutionInput(value: unknown): NativeExecutionInput 
     );
   }
 
+  if (isV7) {
+    if (input.homeMode !== "isolated" && input.homeMode !== "preconfigured") {
+      throw new NativeExecutionInputError("input.homeMode must be isolated or preconfigured");
+    }
+    const selected = record(input.provider, "input.provider");
+    if (input.homeMode === "preconfigured" && selected.kind !== "codex"
+      && !(selected.kind === "acpx" && (selected.agent === "claude" || selected.agent === "codex"))) {
+      throw new NativeExecutionInputError("preconfigured home supports Codex and ACPX Claude/Codex only");
+    }
+  }
   const binding = record(input.binding, "input.binding");
   exactKeys(binding, ["companyId", "runId", "issueId", "agentId", "agentKeyId", "executionWorkspaceId"], "input.binding");
   const task = record(input.task, "input.task");
@@ -838,7 +857,7 @@ export function parseNativeExecutionInput(value: unknown): NativeExecutionInput 
   if (!isV5) return { ...withPermissions, schema: NATIVE_EXECUTION_INPUT_SCHEMA_V4 };
   return {
     ...withPermissions,
-    schema: NATIVE_EXECUTION_INPUT_SCHEMA,
+    ...(isV7 ? { schema: NATIVE_EXECUTION_INPUT_SCHEMA_V7, homeMode: input.homeMode as NativeHomeMode } : { schema: NATIVE_EXECUTION_INPUT_SCHEMA }),
     provider: parsedProvider as NativeProviderConfigV5,
     ...(input.completionSources !== undefined ? { completionSources: parseCompletionSources(input.completionSources) } : {}),
   };
@@ -902,7 +921,7 @@ export function buildNativeModelEnvelope(input: NativeExecutionInput, options?: 
       interactionResponses: structuredClone(input.interactionResponses),
     };
   }
-  if (input.schema === NATIVE_EXECUTION_INPUT_SCHEMA || input.schema === NATIVE_EXECUTION_INPUT_SCHEMA_V6) {
+  if (input.schema === NATIVE_EXECUTION_INPUT_SCHEMA || input.schema === NATIVE_EXECUTION_INPUT_SCHEMA_V6 || input.schema === NATIVE_EXECUTION_INPUT_SCHEMA_V7) {
     const sourceBinding = input.completionSources;
     const references = sourceBinding?.contractRevision === input.completionContract.contract.revision
       && sourceBinding.promptSha256 === createHash("sha256").update(input.task.prompt).digest("hex")

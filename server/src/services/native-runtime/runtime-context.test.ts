@@ -324,6 +324,18 @@ describe("buildNativeRuntimeContext", () => {
     expect(repeated.skills[0]!.bundle.rootPath).toBe(context.skills[0]!.bundle.rootPath);
   });
 
+  it("does not materialize assigned skills or external MCP in preconfigured mode", async () => {
+    serviceMocks.exportFiles.mockResolvedValue({ entryFile: "AGENTS.md", files: { "AGENTS.md": "Test\n" } });
+    const context = await buildNativeRuntimeContext({ db: {} as Db,
+      agent: { id: "agent-1", companyId: "company-1", name: "Reviewer", adapterType: "paperclip_runner", adapterConfig: {} },
+      runId: "run-1", runtimeConfig: { homeMode: "preconfigured", paperclipSkillSync: { desiredSkills: ["missing"] } },
+      runtimeSkillEntries: [{ key: "missing", runtimeName: "missing", source: "/does/not/exist", sourceStatus: "missing" }],
+    });
+    expect(context.skills).toEqual([]);
+    expect(context.mcp.bindingId).toBeNull();
+    expect(serviceMocks.getEffectiveProfilesForAgent).not.toHaveBeenCalled();
+  });
+
   it("fails closed for a missing assigned skill and omits a stale legacy operational skill", async () => {
     serviceMocks.exportFiles.mockResolvedValue({ entryFile: "AGENTS.md", files: { "AGENTS.md": "Test\n" } });
     const base = {

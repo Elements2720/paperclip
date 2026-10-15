@@ -2042,6 +2042,7 @@ export async function executeNativeSession(
     const providerRecoveryCheckpoint = persistedSession;
 
     const replacementAllowed =
+      !("homeMode" in input && input.homeMode === "preconfigured") &&
       providerRecoveryCheckpoint.providerRecoveryPolicy ===
       "allow_replacement_after_resume_failure";
     const failedProviderSession =

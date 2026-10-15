@@ -8851,3 +8851,31 @@ describe("executeNativeSession recovery", () => {
     }
   });
 });
+
+
+it("fails preconfigured recovery without replacing a missing provider session", async () => {
+  const checkpoint: PersistedNativeSession = {
+    backendKind: "mock", sessionId: "driver-preconfigured", identity,
+    providerSessionId: "provider-missing", providerRecoveryPolicy: "allow_replacement_after_resume_failure",
+    cursor: "0", activeTurnId: null, pendingRuntimeRequests: [], lineage: [],
+  };
+  const openSession = vi.fn();
+  const openReplacementSession = vi.fn();
+  const backend: NativeSessionBackend = {
+    descriptor: async () => ({ kind: "mock", name: "preconfigured", version: "1",
+      runtimeContextCapabilities: { instructions: "native", skills: "native", mcp: "native" },
+      capabilities: { resume: true, typedEvents: true, steering: false, interruption: true } }),
+    openSession, openReplacementSession,
+    recoverSession: async () => ({ recovered: false, reason: "provider history is missing" }),
+  };
+  const port: ControlPlanePort = {
+    openRun: vi.fn(), appendEvent: vi.fn(), completeRun: vi.fn(),
+    replayEvents: async () => ({ events: [], highestContiguousSourceSeq: 0 }),
+  };
+  await expect(executeNativeSession({
+    input: { ...preparedInput(), schema: "paperclip.native-execution-input.v7", homeMode: "preconfigured" },
+    backend, controlPlane: port, runnerInstanceId: "runner-preconfigured", persistedSession: checkpoint,
+  })).rejects.toThrow("native_session_recovery_failed: provider history is missing");
+  expect(openSession).not.toHaveBeenCalled();
+  expect(openReplacementSession).not.toHaveBeenCalled();
+});

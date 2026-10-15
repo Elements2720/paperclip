@@ -1,4 +1,5 @@
 import { createPiThinkingAdmission, resolvePiThinkingLevel } from "./pi-thinking.js";
+import { usesPreconfiguredHome } from "../preconfigured-home.js";
 import type { ChildProcess } from "node:child_process";
 
 import {
@@ -187,6 +188,7 @@ export async function openQualifiedAcpxRuntime(
     );
   }
 
+  const preconfigured = usesPreconfiguredHome(options.launchEnvironment);
   const createRegistry = dependencies.createRegistry ?? createAgentRegistry;
   const createStore = dependencies.createStore ?? createRuntimeStore;
   const createRuntime = dependencies.createRuntime ?? createAcpRuntime;
@@ -354,13 +356,14 @@ export async function openQualifiedAcpxRuntime(
       if (!extensionNotifications.has(method) || !active?.onNotification || !ownsExtensionTurn(active, params)) return;
       active.onNotification(method, params.sessionId === undefined ? { ...params, sessionId: active.sessionId } : params);
     },
-    nonInteractivePermissions: "fail",
+    nonInteractivePermissions: preconfigured ? "deny" : "fail",
     permissionPolicy: {
       ...options.permissionPolicy,
-      autoApprove: options.permissionPolicy.autoApprove
+      ...(preconfigured ? { defaultAction: "deny" as const } : {}),
+      autoApprove: !preconfigured && options.permissionPolicy.autoApprove
         ? [...options.permissionPolicy.autoApprove]
         : undefined,
-      escalate: options.permissionPolicy.escalate
+      escalate: !preconfigured && options.permissionPolicy.escalate
         ? [...options.permissionPolicy.escalate]
         : undefined,
     },
@@ -373,6 +376,7 @@ export async function openQualifiedAcpxRuntime(
       ],
     })),
     onPermissionRequest: async (request, context) => {
+      if (preconfigured) return { outcome: "reject_once" };
       const rawSessionId = objectRecord(request.raw).sessionId;
       if (!extensionBoundary.sessionIds.has(request.sessionId)
         || (rawSessionId !== undefined && rawSessionId !== request.sessionId)) {
@@ -430,7 +434,7 @@ export async function openQualifiedAcpxRuntime(
       ...definedEnvironment(options.launchEnvironment),
       ...(options.profile.agent === "claude"
         ? {
-            PAPERCLIP_ACPX_ISOLATED_CONTEXT: "1",
+            ...(preconfigured ? {} : { PAPERCLIP_ACPX_ISOLATED_CONTEXT: "1" }),
             // This URL comes from the runner-owned authenticated tool bridge,
             // never provider-supplied permission-request metadata.
             PAPERCLIP_ACPX_TASK_TOOL_BRIDGE_URL: options.mcpServers.find(
@@ -546,6 +550,13 @@ export async function openQualifiedAcpxRuntime(
     // A provider can answer only after the verified sentinel is armed, but do
     // not admit the session until the owner has observed that exact handoff.
     await children.verifyLifetimeOwnership();
+    if (preconfigured && options.profile.agent === "codex") {
+      if (!runtime.setMode) throw new Error("preconfigured_codex_unattended_mode_unavailable");
+      await commandLaunches.refreshConsumedCommand?.();
+      await runtime.setMode({ handle, mode: "agent-full-access" });
+      await children.verifyLifetimeOwnership();
+      await commandLaunches.refreshConsumedCommand?.();
+    }
     // The handshake or lifetime-ownership observation can settle in the same
     // turn as cancellation. Never admit that newly acquired authority.
     options.signal?.throwIfAborted();
