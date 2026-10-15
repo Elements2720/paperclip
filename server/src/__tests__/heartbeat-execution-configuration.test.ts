@@ -2,7 +2,7 @@ import { enableRunFailureReporting } from "./helpers/run-failure-reporting.js";
 import { createHash, randomUUID } from "node:crypto";
 import { trace } from "@opentelemetry/api";
 import { InMemorySpanExporter, SimpleSpanProcessor, TracerProvider } from "@opentelemetry/sdk-trace";
-import { access, readFile, mkdtemp, rm } from "node:fs/promises";
+import { access, chmod, mkdir, readdir, readFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { eq } from "drizzle-orm";
@@ -105,8 +105,12 @@ describePostgres("heartbeat execution configuration through adapter dispatch", (
 
   it("dispatches preconfigured Runner preparation without acquiring managed auth or materializing assigned skills", async () => {
     const f = await seed(true);
+    const nativeHome = await mkdtemp(path.join(tmpdir(), "paperclip-preconfigured-preparation-"));
+    const workspace = path.join(nativeHome, "workspace");
+    await mkdir(workspace);
+    process.env.PAPERCLIP_HOME = nativeHome;
     await db.update(agents).set({ adapterType: "paperclip_runner", adapterConfig: {
-      provider: "codex", model: "gpt-6.1-sol", homeMode: "preconfigured", cwd: home,
+      provider: "codex", model: "gpt-6.1-sol", homeMode: "preconfigured", cwd: workspace,
     } }).where(eq(agents.id, f.agentId));
     skillFailures.set(f.companyId, "Preconfigured mode must not resolve assigned skills");
     const prepare = vi.spyOn(aiRuntime, "prepareManagedAiRuntime");
@@ -122,7 +126,19 @@ describePostgres("heartbeat execution configuration through adapter dispatch", (
       expect(beforeNative).toHaveBeenCalledOnce();
       expect(prepare).not.toHaveBeenCalled();
       expect(saved?.contextSnapshot?.aiConnection).toBeUndefined();
-    } finally { await nativeHeartbeat.drainActiveRunExecutions(); }
+    } finally {
+      await nativeHeartbeat.drainActiveRunExecutions();
+      process.env.PAPERCLIP_HOME = home;
+      // Native preparation seals context bundles; release only this test's tree.
+      const release = async (directory: string): Promise<void> => {
+        await chmod(directory, 0o700);
+        for (const entry of await readdir(directory, { withFileTypes: true })) {
+          if (entry.isDirectory()) await release(path.join(directory, entry.name));
+        }
+      };
+      await release(nativeHome);
+      await rm(nativeHome, { recursive: true, force: true });
+    }
   });
 
   it("applies project environment and issue overrides and replaces caller-supplied runtime fields", async () => {

@@ -756,7 +756,9 @@ Prepare authentication, skills, and external MCP servers on the execution machin
 before launching. Runner does not install skills, copy or remove credentials, or
 rewrite user configuration in this mode. Runner still supplies the requested
 model, task instructions, and its internal task/completion tools. Local permission
-rules and hooks apply. Execution is unattended: native Codex uses `never`, and
+rules and hooks apply. Native Codex tools can read and modify the execution home
+(read-only for planning); credentials in that home are not isolated from tools.
+Runner-owned protocol state remains separately denied. Execution is unattended: native Codex uses `never`, and
 ACPX rejects requests for approval. If local settings block a task, change them
 and retry. Existing blocked results and failure diagnostics report the outcome;
 a hook that also blocks the reporting tool can leave only a generic diagnostic.

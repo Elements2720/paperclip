@@ -31,6 +31,7 @@ describe("ACPX recovery identity", () => {
     ["copilot", "../../../test/fixtures/copilot-profile-v14-identity.json"],
     ["pi", "../../../test-fixtures/pi-acp/profile-v13-identity.json"],
     ["pi", "../../../test-fixtures/pi-acp/profile-v14-identity.json"],
+    ["pi", "../../../test-fixtures/pi-acp/profile-v22-identity.json"],
     ["cursor", "../../../test/fixtures/cursor-acp/profile-v7-identity.json"],
     ["cursor", "../../../test/fixtures/cursor-acp/profile-v8-identity.json"],
     ["cursor", "../../../test/fixtures/cursor-acp/profile-v9-identity.json"],
