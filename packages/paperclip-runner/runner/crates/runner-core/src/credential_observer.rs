@@ -43,7 +43,6 @@ struct State {
     pending: Option<PolledEvent>,
 }
 
-/// Observes only the runner-owned credential store. Raw credentials never enter PRP.
 pub(crate) struct CredentialObserver {
     state_path: PathBuf,
     session_id: String,
@@ -116,7 +115,6 @@ impl CredentialObserver {
         Ok(())
     }
 
-    /// Called after descriptor validation, before any provider process is started.
     pub(crate) fn configure(&mut self, payload: &Value) -> Result<(), DurableRunnerError> {
         self.restore()?;
         if self.state.is_some() || payload.get("observeCredentials") != Some(&Value::Bool(true)) {
@@ -202,7 +200,6 @@ impl CredentialObserver {
             return;
         };
         let dirty = Arc::clone(&self.dirty);
-        // The callback never reads secrets or persists state. The executor owns both.
         if let Ok(mut watcher) = notify::recommended_watcher(move |_| {
             dirty.store(true, Ordering::Relaxed);
         }) {
@@ -231,7 +228,6 @@ impl CredentialObserver {
         self.watch_directory();
         let state = self.state.as_ref().expect("configured observer");
         let snapshot = read_snapshot(&state.provider, &state.path).or_else(|| {
-            // Grok retains a private handoff after scrubbing the live store on close.
             (state.provider == "grok"
                 && fs::symlink_metadata(&state.path)
                     .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound))
@@ -244,7 +240,6 @@ impl CredentialObserver {
         if state.snapshot.as_ref() == Some(&snapshot) {
             return Ok(());
         }
-        // A different account cannot acquire the current credential binding.
         if state
             .snapshot
             .as_ref()
@@ -262,7 +257,6 @@ impl CredentialObserver {
             next.pending = Some(update_event(&next.provider, next.revision));
         }
         next.snapshot = Some(snapshot);
-        // Persist the new baseline and pending event together before exposing either.
         self.save(&next)?;
         self.state = Some(next);
         Ok(())
@@ -404,7 +398,6 @@ fn parse_snapshot(provider: &str, bytes: &[u8]) -> Option<Snapshot> {
 fn read_snapshot(provider: &str, path: &Path) -> Option<Snapshot> {
     use rustix::fs::{open, openat, Mode, OFlags};
     use std::os::unix::fs::MetadataExt;
-    // Walk directory descriptors so neither the leaf nor a replaced parent can redirect a secret read.
     let parent = path.parent()?;
     if !parent.is_absolute() {
         return None;

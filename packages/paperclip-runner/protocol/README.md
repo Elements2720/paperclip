@@ -49,7 +49,7 @@ capability is unsupported; clients do not infer support from an adapter name.
 
 ## Harness credential updates
 
-`auth.credentials.updated` is a P0 runner event available in both event
+`auth.credentials.updated` is a P0 runner event available in the v1, v2, and v3 event
 schemas. Its payload uses `paperclip.auth.credentials.updated.v1` and contains
 only `provider`, `bindingId`, `revision`, and `detection`. No tokens, account
 identifiers, credential paths, or credential fingerprints are permitted.

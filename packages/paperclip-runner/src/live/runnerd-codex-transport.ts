@@ -1230,7 +1230,6 @@ export interface CapabilityRunnerdProcessEvidence {
 
 export interface CapabilityRunnerdCodexTransportOptions extends RunnerExecutionDriver {
   provider?: "codex" | "opencode" | "claude_managed" | "aws_agentcore" | "acpx";
-  /** Opt in to content-free credential change events from supported harnesses. */
   observeCredentials?: boolean;
   opencodePermissionMode?: NativeOpenCodePermissionMode;
   acpxAgent?: QualifiedAcpxAgent;

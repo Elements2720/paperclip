@@ -7,16 +7,16 @@ const payload: PrpAuthCredentialsUpdated = {
   revision: 1, detection: "credential_store",
 };
 
-function event(version: 1 | 2): PrpEvent {
+function event(version: 1 | 2 | 3): PrpEvent {
   return {
-    schema: version === 1 ? "paperclip.prp.event.v1" : "paperclip.prp.event.v2",
+    schema: `paperclip.prp.event.v${version}`,
     schemaVersion: version, sourceEventId: "credential-update-1", sourceSeq: 1,
     sourceInstanceId: "runner", sourceKind: "runner", runId: "run", normalizedSessionId: "session",
     eventType: "auth.credentials.updated", priority: 0, emittedAt: "2026-10-15T12:00:00.000Z", payload,
   };
 }
 
-describe.each([1, 2] as const)("PRP v%s credential updates", (version) => {
+describe.each([1, 2, 3] as const)("PRP v%s credential updates", (version) => {
   it("accepts content-free store and native-hook notifications", () => {
     expect(isCanonicalProviderEventType("auth.credentials.updated")).toBe(true);
     expect(validatePrpEvent(event(version)).ok).toBe(true);

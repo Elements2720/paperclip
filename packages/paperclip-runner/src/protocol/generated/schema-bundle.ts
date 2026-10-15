@@ -5522,7 +5522,8 @@ export const eventV3Schema = {
         "issue.status.decision.superseded",
         "run.terminal",
         "external_provider.dispatch_requested",
-        "external_provider.operation_settled"
+        "external_provider.operation_settled",
+        "auth.credentials.updated"
       ]
     },
     "schemaVersion": {
@@ -5916,6 +5917,28 @@ export const eventV3Schema = {
           }
         },
         "type": "object"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "auth.credentials.updated"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "sourceKind": {
+            "const": "runner"
+          },
+          "priority": {
+            "const": 0
+          },
+          "payload": {
+            "$ref": "https://paperclip.dev/schemas/prp/v1/auth-credentials.schema.json"
+          }
+        }
       }
     }
   ],
