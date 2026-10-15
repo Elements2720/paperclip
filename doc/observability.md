@@ -44,6 +44,11 @@ acceptance. Eyes acknowledge durable receipt; they do not certify agent startup.
 The existing action worker retains retries, credential fencing and exact-source
 cleanup when the final response is published.
 
+The Slack adapter also skips the SDK's two-second polling wait for optional link
+unfurls before message dispatch. Text, formatted content, link URLs and file
+download handles remain available. Paperclip does not consume that optional
+preview metadata for task admission.
+
 With an operator OTLP endpoint, the `paperclip.chat` tracer records
 `chat.slack.receipt` around each Slack reaction API attempt. Its closed attributes
 are `paperclip.chat.receipt.operation` (`add` or `remove`),

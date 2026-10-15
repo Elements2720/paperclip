@@ -28465,6 +28465,37 @@ describeEmbeddedPostgres("chat channel control-plane integration", () => {
     await service.shutdown();
   });
 
+  it("acknowledges a signed URL mention through the real Slack SDK without waiting for an unfurl", async () => {
+    const fixture = await seedCompany();
+    const { endpoint, runtime, service, wakeup } = await configuredSlackEndpoint(fixture);
+    const pinned = createChatSdkEndpointRuntime({ ...runtime.configurations.get(endpoint.id)!, logger: "silent" });
+    const threadId = "slack:CFASTSDK:1740000090.1";
+    const adapter = pinned.thread(threadId).adapter as unknown as {
+      _client: { auth: { test: (...args: unknown[]) => Promise<unknown> }; users: { info: (...args: unknown[]) => Promise<unknown> } };
+    };
+    adapter._client.auth.test = vi.fn(async () => ({ ok: true, user_id: "UBOT", user: "maya", team_id: "T-PAPERCLIP" }));
+    adapter._client.users.info = vi.fn(async () => ({ ok: true, user: { id: "USENDER", profile: { display_name: "Test sender" } } }));
+    const startedAt = performance.now();
+    try {
+      const response = await pinned.handleWebhook(signedSlackWebhookRequest({
+        url: `https://paperclip.example/api/chat-webhooks/${endpoint.publicId}/slack`, contentType: "application/json",
+        body: JSON.stringify({ type: "event_callback", event_id: "EvFASTSDK", team_id: "T-PAPERCLIP",
+          event: { type: "app_mention", channel: "CFASTSDK", user: "USENDER", ts: "1740000090.1", text: "<@UBOT> review <https://example.com/review|this link>" },
+        }),
+      }));
+      expect(response.status).toBe(200);
+      await vi.waitFor(() => expect(runtime.endpoints.get(endpoint.id)!.reactions).toEqual([
+        { threadId, messageId: "1740000090.1", emoji: "eyes" },
+      ]), { timeout: 1_000, interval: 10 });
+      expect(wakeup).toHaveBeenCalledTimes(1);
+      expect(adapter._client.users.info).toHaveBeenCalled();
+      process.stdout.write(`Signed URL mention through real Slack SDK: eyes confirmed in ${(performance.now() - startedAt).toFixed(1)}ms (real PostgreSQL, simulated provider APIs)\n`);
+    } finally {
+      await pinned.shutdown();
+      await service.shutdown();
+    }
+  });
+
   it("settles a retried Slack receipt reaction when the provider reports already_reacted", async () => {
     const fixture = await seedCompany();
     const { callbacks, endpoint, runtime, service } =
