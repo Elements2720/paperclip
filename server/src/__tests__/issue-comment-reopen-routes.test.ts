@@ -1421,6 +1421,7 @@ describe("issue comment reopen routes", () => {
 
     const metadata = {
       version: 1,
+      authorizationReason: "client-forged",
       sections: [
         {
           rows: [
@@ -1463,7 +1464,10 @@ describe("issue comment reopen routes", () => {
           tone: "warning",
           detailsDefaultOpen: false,
         },
-        metadata,
+        metadata: {
+          version: 1,
+          sections: metadata.sections,
+        },
         sourceTrust: null,
       },
       mockTx,

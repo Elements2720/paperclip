@@ -68,6 +68,9 @@ import {
   stalledReviewDecisionSchema,
   createIssueLabelSchema,
   addIssueCommentSchema,
+  issueCommentAuthorTypeSchema,
+  issueCommentMetadataSchema,
+  issueCommentPresentationSchema,
   checkoutIssueSchema,
   linkIssueApprovalSchema,
   createIssueWorkProductSchema,
@@ -685,7 +688,7 @@ const cliAuthChallengeIdParamSchema = z.string().trim()
 const ErrorSchema = registry.register("Error", z.object({ error: z.string() }));
 
 const responses = {
-  ok: (schema: z.ZodTypeAny = z.record(z.string(), z.unknown())) => ({
+  ok: (schema: z.ZodTypeAny | JsonSchema = z.record(z.string(), z.unknown())) => ({
     description: "Success",
     content: { "application/json": { schema } },
   }),
@@ -772,6 +775,102 @@ const importRequestBody = (schema: z.ZodTypeAny) => ({
 });
 
 const r = responses;
+
+const issueCommentAuthorizationReasonValues = [
+  "allow_low_trust_boundary",
+  "allow_explicit_grant",
+  "allow_issue_mention_grant",
+  "allow_direct_parent_report",
+  "allow_visible_issue_write",
+  "allow_self",
+  "allow_company_agent",
+  "allow_scoped_agent_write",
+  "allow_chat_run_presentation",
+  "internal_agent_write",
+  "paperclip_runner_protocol",
+  "execution_workspace_branch_reconcile",
+  "onboarding first-task greeting",
+];
+
+const issueCommentAuthorizationReasonDescriptions = [
+  "A low-trust boundary allowed the write.",
+  "An explicit grant allowed the write.",
+  "An issue mention grant allowed the write.",
+  "A direct parent report was allowed.",
+  "A visible issue write was allowed.",
+  "The actor was allowed to write to its own resource.",
+  "A company agent was allowed to write.",
+  "A scoped agent write was allowed.",
+  "An externally presentable chat response was allowed.",
+  "An internal agent comment was written.",
+  "The Paperclip runner protocol wrote the comment.",
+  "An execution workspace branch reconciliation wrote the audit comment.",
+  "The onboarding first-task greeting wrote the comment.",
+];
+
+const issueCommentMetadataResponseSchema = zodToOpenApiSchema(
+  issueCommentMetadataSchema,
+);
+const issueCommentMetadataResponseProperties =
+  issueCommentMetadataResponseSchema.properties as Record<string, JsonSchema>;
+issueCommentMetadataResponseProperties.authorizationReason = {
+  ...issueCommentMetadataResponseProperties.authorizationReason,
+  readOnly: true,
+  enum: issueCommentAuthorizationReasonValues,
+  description:
+    "Server-generated audit value for agent-authored comments. The allow_ prefix identifies a comment authorized for external publication.",
+  "x-enum-descriptions": issueCommentAuthorizationReasonDescriptions,
+};
+
+const addIssueCommentOpenApiSchema = addIssueCommentSchema.extend({
+  metadata: issueCommentMetadataSchema
+    .omit({ authorizationReason: true })
+    .nullable()
+    .optional(),
+});
+
+const issueCommentResponseBaseSchema = z.object({
+  clientRequestId: z.string().nullable().optional(),
+  conversationSessionGeneration: z.number().int().nullable().optional(),
+  id: z.string().uuid(),
+  companyId: z.string().uuid(),
+  issueId: z.string().uuid(),
+  authorType: issueCommentAuthorTypeSchema,
+  origin: z.enum(["comment", "fast_response"]),
+  fastResponseRequestId: z.string().uuid().nullable(),
+  authorAgentId: z.string().uuid().nullable(),
+  authorUserId: z.string().nullable(),
+  onBehalfOfUserId: z.string().nullable().optional(),
+  createdByRunId: z.string().uuid().nullable(),
+  derivedAuthorAgentId: z.string().uuid().nullable().optional(),
+  derivedCreatedByRunId: z.string().uuid().nullable().optional(),
+  derivedAuthorSource: z
+    .enum(["run_id", "run_log_comment_post"])
+    .nullable()
+    .optional(),
+  body: z.string(),
+  presentation: issueCommentPresentationSchema.nullable(),
+  metadata: issueCommentMetadataSchema.nullable(),
+  deletedAt: z.string().datetime().nullable().optional(),
+  deletedByType: z.enum(["agent", "user"]).nullable().optional(),
+  deletedByAgentId: z.string().uuid().nullable().optional(),
+  deletedByUserId: z.string().nullable().optional(),
+  deletedByRunId: z.string().uuid().nullable().optional(),
+  sourceTrust: z.record(z.string(), z.unknown()).nullable().optional(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+const issueCommentResponseSchema = zodToOpenApiSchema(
+  issueCommentResponseBaseSchema,
+);
+(issueCommentResponseSchema.properties as Record<string, JsonSchema>).metadata =
+  issueCommentMetadataResponseSchema;
+
+const issueCommentListResponseSchema: JsonSchema = {
+  type: "array",
+  items: issueCommentResponseSchema,
+};
 
 const externalObjectSummariesBodySchema = z
   .object({
@@ -4512,6 +4611,8 @@ registry.registerPath({
   path: "/api/issues/{id}/documents/{key}",
   tags: ["issues"],
   summary: "Upsert an issue document",
+  description:
+    "Document revisions intentionally do not carry an authorizationReason; that audit field is specific to issue comments.",
   request: {
     params: z.object({ id: z.string(), key: z.string() }),
     body: jsonBody(upsertIssueDocumentSchema),
@@ -4559,7 +4660,7 @@ registry.registerPath({
   tags: ["issues"],
   summary: "List issue comments",
   request: { params: z.object({ id: z.string() }) },
-  responses: { 200: r.ok(), 401: r.unauthorized },
+  responses: { 200: r.ok(issueCommentListResponseSchema), 401: r.unauthorized },
 });
 
 registry.registerPath({
@@ -4569,9 +4670,14 @@ registry.registerPath({
   summary: "Add a comment to an issue",
   request: {
     params: z.object({ id: z.string() }),
-    body: jsonBody(addIssueCommentSchema),
+    body: jsonBody(addIssueCommentOpenApiSchema),
   },
-  responses: { 200: r.ok(), 400: r.badRequest, 401: r.unauthorized },
+  responses: {
+    200: r.ok(issueCommentResponseSchema),
+    201: r.ok(issueCommentResponseSchema),
+    400: r.badRequest,
+    401: r.unauthorized,
+  },
 });
 
 registry.registerPath({
@@ -9551,7 +9657,11 @@ registry.registerPath({
   tags: ["issues"],
   summary: "Get a single issue comment",
   request: { params: z.object({ id: z.string(), commentId: z.string() }) },
-  responses: { 200: r.ok(), 401: r.unauthorized, 404: r.notFound },
+  responses: {
+    200: r.ok(issueCommentResponseSchema),
+    401: r.unauthorized,
+    404: r.notFound,
+  },
 });
 
 registry.registerPath({

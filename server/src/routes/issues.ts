@@ -149,6 +149,7 @@ import {
   type IssueReviewPolicy,
   type IssueThreadInteractionCanonicalResolverPolicy,
   type IssueComment,
+  type IssueCommentMetadata,
   type IssueCommentPresentation,
   type IssueQueuedCommentQueue,
   type IssueWatchdogDiscoveryKind,
@@ -863,12 +864,26 @@ function isOnboardingFirstTaskConflict(error: unknown): boolean {
 
 function issueWriteAuthorizationReason(
   req: Request,
-  decision: true | { reason?: string | null },
+  decision: true | { allowed: boolean; reason?: string | null },
 ) {
-  if (decision !== true && decision.reason) return decision.reason;
+  if (
+    decision !== true &&
+    decision.allowed &&
+    decision.reason?.startsWith("allow_")
+  ) {
+    return decision.reason;
+  }
   return req.actor.type === "agent"
     ? "allow_scoped_agent_write"
     : "allow_board_actor";
+}
+
+function stripClientAuthorizationReason(
+  metadata: IssueCommentMetadata | null | undefined,
+): IssueCommentMetadata | null {
+  if (!metadata) return null;
+  const { authorizationReason: _authorizationReason, ...serverOwnedMetadata } = metadata;
+  return serverOwnedMetadata;
 }
 
 function readPlanConfirmationTargetForIssue(payload: unknown, issueId: string) {
@@ -5629,7 +5644,10 @@ export function issueRoutes(
       /** Used only to name the task in denial copy (plan §6). */
       identifier?: string | null;
     },
-    options: { allowVisibleIssueWrite?: boolean } = {},
+    options: {
+      allowVisibleIssueWrite?: boolean;
+      returnAuthorizationDecision?: boolean;
+    } = {},
   ) {
     if (!(await assertIssueReadAllowed(req, res, issue))) return false;
     if (req.actor.type !== "agent") return true;
@@ -5687,8 +5705,10 @@ export function issueRoutes(
         issueWriteDenialCodeForDecision(boundaryDecision),
       );
     }
+    const allowMutation = () =>
+      options.returnAuthorizationDecision ? boundaryDecision : true;
     if (issue.assigneeAgentId === null) {
-      return true;
+      return allowMutation();
     }
     if (issue.assigneeAgentId !== actorAgentId) {
       if (
@@ -5698,7 +5718,7 @@ export function issueRoutes(
           issue.assigneeAgentId,
         )
       ) {
-        return true;
+        return allowMutation();
       }
       if (issue.status === "in_progress") {
         // Run/checkout ownership stays assignee-scoped even though writes are
@@ -5734,10 +5754,10 @@ export function issueRoutes(
         });
         return false;
       }
-      return true;
+      return allowMutation();
     }
     if (issue.status !== "in_progress") {
-      return true;
+      return allowMutation();
     }
     const runId = requireAgentRunId(req, res);
     if (!runId) return false;
@@ -5765,7 +5785,7 @@ export function issueRoutes(
         },
       });
     }
-    return true;
+    return allowMutation();
   }
 
   async function assertFreshTaskWatchdogSourceMutation(
@@ -13620,16 +13640,16 @@ export function issueRoutes(
         req,
         res,
         existing,
-        { allowVisibleIssueWrite: true },
+        {
+          allowVisibleIssueWrite: true,
+          returnAuthorizationDecision: true,
+        },
       );
       if (!issueMutationAccess) return;
       if (req.body.comment && !(await assertBoardCommentNotPaused(req, res, existing))) return;
       const issueMutationAuthorizationReason =
         req.actor.type === "agent"
-          ? issueWriteAuthorizationReason(
-              req,
-              await decideIssueAccess(req, existing, "issue:mutate"),
-            )
+          ? issueWriteAuthorizationReason(req, issueMutationAccess)
           : issueWriteAuthorizationReason(req, true);
 
       const actor = getActorInfo(req);
@@ -18238,6 +18258,10 @@ export function issueRoutes(
         })
       )
         return;
+      const commentMetadata =
+        req.actor.type === "board"
+          ? stripClientAuthorizationReason(req.body.metadata)
+          : (req.body.metadata ?? null);
       const closedExecutionWorkspace =
         await getClosedIssueExecutionWorkspace(issue);
 
@@ -18574,7 +18598,7 @@ export function issueRoutes(
             req.body.authorType ??
             (actor.actorType === "agent" ? "agent" : "user"),
           presentation: commentPresentation,
-          metadata: req.body.metadata ?? null,
+          metadata: commentMetadata,
           attachmentIds: req.body.attachmentIds,
           clientRequestId: actor.actorType === "user" ? req.body.clientRequestId : undefined,
           mirrorToSlack: actor.actorType === "user",
@@ -18687,7 +18711,7 @@ export function issueRoutes(
             req.body.authorType ??
             (actor.actorType === "agent" ? "agent" : "user"),
           presentation: commentPresentation,
-          metadata: req.body.metadata ?? null,
+          metadata: commentMetadata,
           attachmentIds: req.body.attachmentIds,
           clientRequestId: actor.actorType === "user" ? req.body.clientRequestId : undefined,
           mirrorToSlack: actor.actorType === "user",
