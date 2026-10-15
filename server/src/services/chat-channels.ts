@@ -849,7 +849,7 @@ export function chatChannelService(db: Db, options: ChatChannelServiceOptions) {
     attachmentOmissionDetail, runtimeContextForRecord, endpointRecord, stageProviderEffect, scheduleProviderEffect,
   });
   const { handleReaction, processPendingReactionDeliveries } = createInboundReactions(db, { lockCurrentPrincipalAuthorization, runtimeCallbackRecord, runtimeCallbackEndpoint, ensurePrincipal, durableExternalThreadIdentity, recordCurrentMicrosoftTeamsRoute, lifecycleRuntimeFence, deliveryReady, redactError, nonDirectDestinationAllowed, reactionLinkPreflightBarrier: () => options.reactionLinkPreflightBarrier?.() ?? Promise.resolve(), reactionReplayEndpointLockBarrier: () => options.reactionReplayEndpointLockBarrier?.() ?? Promise.resolve(), reactionReplayConversationLockBarrier: () => options.reactionReplayConversationLockBarrier?.() ?? Promise.resolve() });
-  const { addReceiptReaction, processReceiptReaction, processPendingReceiptReactions } = createReceiptReactions(db, { endpointRecord, runtimeContextForRecord, withCredentialMutationLease, runtimeFor, fetchImpl, runtime, runtimeGeneration, credentialFingerprint, redactError, MAX_ERROR_TEXT, receiptReactionTransportBarrier: () => options.receiptReactionTransportBarrier?.() ?? Promise.resolve() });
+  const { stageReceiptReaction, addReceiptReaction, processReceiptReaction, processPendingReceiptReactions } = createReceiptReactions(db, { endpointRecord, runtimeContextForRecord, withCredentialMutationLease, runtimeFor, fetchImpl, runtime, runtimeGeneration, credentialFingerprint, redactError, MAX_ERROR_TEXT, receiptReactionTransportBarrier: () => options.receiptReactionTransportBarrier?.() ?? Promise.resolve() });
   const { admitDiscordRootMention, discordRootThreadPending, reconcileDiscordRootThread, promoteDiscordRootReceipt } = createDiscordRootThreads(db, { ensureDiscordGatewayRuntimeIsCurrent, withCredentialMutationLease, runtimeCallbackEndpoint, lockCurrentPrincipalAuthorization, processMessage, redactError, scheduleConversationDrain, lifecycleRuntimeFence, runtimeFor, DISCORD_ROOT_THREAD_CONFIRMATION_DELAY_MS, discordRootThreadTransportBarrier: () => options.discordRootThreadTransportBarrier?.() ?? Promise.resolve() });
   const { handleDiscordGatewayEvent } = createDiscordGatewayEvents(db, { ensureDiscordGatewayRuntimeIsCurrent, discordGatewayRuntimeIsCurrent, runtimeCallbackRecord, runtimeCallbackEndpoint, applyProviderLifecycleEffect, runtimeGeneration, discordGatewayEventBarrier: (event) => options.discordGatewayEventBarrier?.(event) ?? Promise.resolve() });
   const { handlePhotonFailure, handlePhotonEvent } = createPhotonEvents(db, { runtimeCallbackRecord, runtimeCallbackEndpoint, invalidateRuntime, ensurePrincipal, requireCurrentExternalActionAuthorization, isExternalActionAuthorizationChange, scheduleMessageProcessing, processPendingPublications, questionResponses, redactError, renewDiscordGatewayOwnershipForMessageAdmission, handleSdkMessage });
@@ -2319,10 +2319,19 @@ export function chatChannelService(db: Db, options: ChatChannelServiceOptions) {
           principalId: principalResolution.principal.id,
           actorUserId: taskUserId,
         });
+        const receiptActionId = taskEndpoint.provider === "slack" && receiptReactionSupported && runtimeContext
+          ? await stageReceiptReaction(taskTx, {
+              deliveryId: activeDelivery.id,
+              endpoint: taskEndpoint,
+              threadId: thread.id,
+              messageId: message.id,
+              runtimeContext,
+            })
+          : null;
         if (taskEndpoint.provider === "imessage-photon") {
           await recordPhotonInboundActivity(taskTx, taskEndpoint, issue, comment.id, taskUserId, inboundActivityPublications);
         }
-        return { actorUserId: taskUserId, comment, conversation, issue };
+        return { actorUserId: taskUserId, comment, conversation, issue, receiptActionId };
       };
       const taskMutation = await db.transaction(async (tx) => {
         // Admission and durable task mutation are separate so the provider
@@ -2462,6 +2471,19 @@ export function chatChannelService(db: Db, options: ChatChannelServiceOptions) {
         );
       });
       if (!taskMutation) return;
+      // Slack's eyes mean the authorized message has been durably received.
+      // Dispatch immediately after commit, independently of file downloads,
+      // subscriptions and scheduler admission. The durable action owns retry;
+      // slow Slack I/O must not hold up the task's remaining acceptance work.
+      const earlyReceiptReaction = taskMutation.receiptActionId
+        ? processReceiptReaction(taskMutation.receiptActionId).catch((error) => {
+            logger.warn({ error: redactError(error) }, "early chat receipt dispatch failed; durable worker will recover");
+          })
+        : null;
+      if (earlyReceiptReaction) {
+        backgroundMessageTasks.add(earlyReceiptReaction);
+        void earlyReceiptReaction.finally(() => backgroundMessageTasks.delete(earlyReceiptReaction));
+      }
       // The open task can fetch the comment immediately, before attachments
       // finish preparing or the agent starts. Never publish an uncommitted row.
       for (const publication of inboundActivityPublications) {
@@ -2513,10 +2535,11 @@ export function chatChannelService(db: Db, options: ChatChannelServiceOptions) {
         .limit(1)
         .then((rows) => rows[0] ?? null);
       if (acceptedWake?.status !== "processed") return;
-      // Provider-visible acknowledgement begins only after the task, external
-      // comment, durable wakeup request, delivery state, and message link commit.
+      // Other providers acknowledge accepted wakeup requests here. Slack's
+      // receipt was already staged with the authorized task/comment above;
+      // this idempotent reconciliation also covers older recovered deliveries.
       await Promise.allSettled([
-        receiptReactionSupported
+        earlyReceiptReaction ?? (receiptReactionSupported
           ? addReceiptReaction({
               deliveryId: activeDelivery.id,
               endpoint,
@@ -2524,7 +2547,7 @@ export function chatChannelService(db: Db, options: ChatChannelServiceOptions) {
               runtimeContext,
               thread,
             })
-          : Promise.resolve(),
+          : Promise.resolve()),
         // Slack implements this through assistant.threads.setStatus, which
         // requires assistant:write. The least-privilege Paperclip manifest
         // deliberately does not request that scope; the coalesced lifecycle

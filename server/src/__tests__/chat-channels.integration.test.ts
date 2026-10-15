@@ -1758,6 +1758,7 @@ describeEmbeddedPostgres("chat channel control-plane integration", () => {
         | "questionFormOpenAuthorizationBarrier"
         | "questionResolutionPersistBarrier"
         | "reactionReplayEndpointLockBarrier"
+        | "receiptReactionTransportBarrier"
         | "reachAuthorizationBarrier"
         | "resolveNativeQuestion"
         | "renewCredentialMutationLease"
@@ -28007,6 +28008,8 @@ describeEmbeddedPostgres("chat channel control-plane integration", () => {
       const fixture = await seedCompany();
       const statusCalls: string[] = [];
       const ordinaryFetch = fakeSlackFetch();
+      let releaseReceipt!: () => void;
+      const receiptGate = new Promise<void>((resolve) => { releaseReceipt = resolve; });
       let earlyFinal:
         | ((
             agentId: string,
@@ -28017,6 +28020,7 @@ describeEmbeddedPostgres("chat channel control-plane integration", () => {
         | undefined;
       const context = await configuredSlackEndpoint(fixture, {
         scheduleDeferredWork: () => undefined,
+        ...(mode === "final_before_add" ? { receiptReactionTransportBarrier: () => receiptGate } : {}),
         fetch: async (input, init) => {
           if (
             String(input) === "https://slack.com/api/agents.sessions.setStatus"
@@ -28089,8 +28093,9 @@ describeEmbeddedPostgres("chat channel control-plane integration", () => {
                 eq(chatActions.kind, "receipt_reaction"),
               ),
             ),
-        ).resolves.toHaveLength(0);
+        ).resolves.toHaveLength(1);
         await publishFinal();
+        releaseReceipt();
         return { runId };
       };
       try {
@@ -28210,6 +28215,7 @@ describeEmbeddedPostgres("chat channel control-plane integration", () => {
         ).toHaveLength(1);
         expect(wakeup).toHaveBeenCalledTimes(mode === "newer_followup" ? 2 : 1);
       } finally {
+        releaseReceipt();
         // Retire the synthetic still-running retry's conversation so later
         // globally-scanned milestone fixtures cannot inherit this test's work.
         if (mode === "same_source_retry")
@@ -28418,6 +28424,45 @@ describeEmbeddedPostgres("chat channel control-plane integration", () => {
         await retirePublicationFixture(service, endpoint.id);
       }
     }
+  });
+
+  it.each(["attachment", "subscription", "wakeup"] as const)("acknowledges a Slack mention while %s is blocked", async (phase) => {
+    const fixture = await seedCompany();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const entered = vi.fn();
+    const blocked = async () => { entered(); await gate; return { accepted: true }; };
+    const { callbacks, endpoint, runtime, service, wakeup } = await configuredSlackEndpoint(fixture, {
+      ...(phase === "wakeup" ? { wakeup: blocked } : {}),
+      ...(phase === "attachment" ? { storage: createStorageService().storage } : {}),
+    });
+    const thread = makeThread({ channelId: "CFAST", id: "slack:CFAST:1740000088.1" });
+    if (phase === "subscription") thread.thread.subscribe = async () => { await blocked(); };
+    const message = makeMessage({ id: "1740000088.1", text: "@maya acknowledge immediately", mentioned: true,
+      ...(phase === "attachment" ? { attachments: [{ type: "file", name: "receipt.txt", mimeType: "text/plain", fetchData: async () => { await blocked(); return Buffer.from("synthetic attachment"); } } as Attachment] } : {}),
+    });
+    const startedAt = performance.now();
+    const inbound = deliverMessage({ callbacks, endpointId: endpoint.id, thread: thread.thread, message, trigger: "mention" });
+    try {
+      await vi.waitFor(() => expect(entered).toHaveBeenCalled(), { timeout: 3_000, interval: 10 });
+      await vi.waitFor(() => expect(runtime.endpoints.get(endpoint.id)!.reactions).toHaveLength(1), { timeout: 1_000, interval: 10 });
+      const [delivery] = await readChatDeliveriesByEndpointId(endpoint.id);
+      await vi.waitFor(async () => {
+        const [receipt] = await readChatActionsByProviderActionId(`receipt_reaction:${delivery.id}`);
+        expect(receipt.status).toBe("processed");
+      }, { timeout: 1_000, interval: 10 });
+      const [receipt] = await readChatActionsByProviderActionId(`receipt_reaction:${delivery.id}`);
+      expect(await readIssuesByCompanyId(fixture.companyId)).toHaveLength(1);
+      expect(await db.select().from(agentWakeupRequests).where(eq(agentWakeupRequests.companyId, fixture.companyId))).toHaveLength(0);
+      process.stdout.write(`Slack ${phase} blocked: eyes confirmed in ${(performance.now() - startedAt).toFixed(1)}ms; durable receipt to confirmed action ${receipt.updatedAt.getTime() - delivery.receivedAt.getTime()}ms (synthetic Slack, real PostgreSQL)\n`);
+    } finally {
+      release();
+      await inbound;
+    }
+    await deliverMessage({ callbacks, endpointId: endpoint.id, thread: thread.thread, message, trigger: "mention" });
+    expect(runtime.endpoints.get(endpoint.id)!.reactions).toHaveLength(1);
+    expect(wakeup).toHaveBeenCalledTimes(1);
+    await service.shutdown();
   });
 
   it("settles a retried Slack receipt reaction when the provider reports already_reacted", async () => {

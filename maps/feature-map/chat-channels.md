@@ -48,6 +48,13 @@ top-level replies to top-level DMs. Channel messages and thread replies still
 require a mention when that setting is enabled. Disable direct messages and
 confirm a plain DM is rejected. Use a private channel for threaded conversations.
 
+For Slack acknowledgement latency, mention the bot with and without an attachment.
+Eyes should appear after authorized task/comment persistence, independently of
+file preparation, subscription and agent startup. Duplicate delivery must keep
+one receipt; the final reply must remove only its source message's eyes. Record
+live mention-to-reaction timing separately from the PostgreSQL fixture tests and
+the `chat.slack.receipt` transport span described in [Observability](../../doc/observability.md).
+
 ### `endpoint-management`
 
 Automated: [channel integration](../../server/src/__tests__/chat-channels.integration.test.ts) covers shared endpoint/delivery behavior; live credential repair and provider ownership remain manual checks.
