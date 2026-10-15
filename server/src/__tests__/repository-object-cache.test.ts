@@ -159,3 +159,17 @@ it.each(["https://user:secret@github.com/fixture/repo", "https://github.com/fixt
   expect(await resolveRepositoryObjectCache(f.company, repoUrl, null)).toBeNull();
   await expect(fs.stat(f.company)).rejects.toMatchObject({ code: "ENOENT" });
 });
+
+it("does not initialize or publish through a replaced cache parent", async () => {
+  const f = await fixture();
+  const other = path.join(f.root, "other"); await fs.mkdir(other);
+  await fs.symlink(other, path.dirname(f.company));
+  expect(await resolveRepositoryObjectCache(f.company, f.repoUrl, null)).toBeNull();
+  expect(await fs.readdir(other)).toEqual([]);
+  await fs.unlink(path.dirname(f.company));
+  const cache = (await resolveRepositoryObjectCache(f.company, f.repoUrl, null))!;
+  await fs.rename(path.dirname(f.company), path.join(f.root, "retained"));
+  await fs.mkdir(path.join(other, "company")); await fs.symlink(other, path.dirname(f.company));
+  await publishRepositoryObjectCache(cache, f.source);
+  expect(await fs.readdir(path.join(other, "company"))).toEqual([]);
+});

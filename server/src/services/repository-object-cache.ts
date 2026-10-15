@@ -25,8 +25,12 @@ export async function resolveRepositoryObjectCache(companyDirectory: string, rep
   try {
     const remote = new URL(repoUrl);
     if (remote.username || remote.password || remote.search || remote.hash) return null;
-    await fs.mkdir(companyDirectory, { recursive: true, mode: 0o700 });
-    for (const directory of [path.dirname(companyDirectory), companyDirectory]) {
+    const parent = path.dirname(companyDirectory);
+    await fs.mkdir(parent, { recursive: true, mode: 0o700 });
+    for (const directory of [parent, companyDirectory]) {
+      if (directory === companyDirectory) await fs.mkdir(directory, { mode: 0o700 }).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== "EEXIST") throw error;
+      });
       const stat = await fs.lstat(directory);
       if (!stat.isDirectory() || stat.isSymbolicLink()) return null;
     }
@@ -43,6 +47,7 @@ export async function readRepositoryObjectCache(cache: RepositoryObjectCache): P
       const stat = await fs.lstat(directory);
       if (!stat.isDirectory() || stat.isSymbolicLink()) return null;
     }
+    if (await fs.realpath(cache.companyDirectory) !== cache.companyDirectory) return null;
     const objects = await fs.lstat(path.join(cache.directory, "objects"));
     if (!objects.isDirectory() || objects.isSymbolicLink()) return null;
     if (await fs.lstat(path.join(cache.directory, "objects/info/alternates")).then(() => true, () => false)) return null;
@@ -76,6 +81,8 @@ export async function publishRepositoryObjectCache(cache: RepositoryObjectCache,
   try {
     if (await readRepositoryObjectCache(cache)) return;
     await tryWithDirectoryMergeLock(cache.companyDirectory, async () => {
+      const company = await fs.lstat(cache.companyDirectory);
+      if (!company.isDirectory() || company.isSymbolicLink() || await fs.realpath(cache.companyDirectory) !== cache.companyDirectory) return;
       const budget = { entries: 4096, deadline: performance.now() + 5000 };
       let repositories = 0, bytes = 0;
       for await (const entry of await fs.opendir(cache.companyDirectory)) {
