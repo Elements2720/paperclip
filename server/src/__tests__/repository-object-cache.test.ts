@@ -91,6 +91,7 @@ it("rebuilds from the remote when the cached pack is corrupt", async () => {
   for (const entry of await fs.readdir(path.join(cache.directory, "objects/pack"))) {
     if (entry.endsWith(".pack")) await fs.writeFile(path.join(cache.directory, "objects/pack", entry), "corrupted");
   }
+  await f.git(path.join(f.root, "first"), "fsck", "--full");
   await f.prepare("second");
   expect(await fs.readFile(path.join(f.root, "second/work.txt"), "utf8")).toBe("initial\n");
 });

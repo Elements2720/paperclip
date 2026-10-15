@@ -1147,8 +1147,8 @@ Every new checkout still contacts the remote with current Git credentials.
 remote's current refs and creates independent storage. An unavailable or denied
 remote cannot fall back to cached files. A failed reference clone retries once
 without the cache and resolves credentials again. Task commits and dirty files
-never populate this cache. Restore continues to use a fresh upstream object
-store for its independent authorization proof.
+never populate this cache. Reproducibility checks continue to use a fresh upstream object store for
+their independent proof; they do not use this cache.
 
 Cache publication is optional and never waits for another publisher. It keeps
 at most 64 entries and 4 GiB per company, with 2 GiB per entry. Temporary cache
