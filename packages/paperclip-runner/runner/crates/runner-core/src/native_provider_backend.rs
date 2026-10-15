@@ -328,10 +328,12 @@ impl CommandExecutor for NativeProviderCommandExecutor {
         // Selection only loads the provider authority. The selected executor
         // decides whether terminal delivery can settle without a cold launch.
         self.select_recovery()?;
-        self.selected.as_mut().map_or_else(
+        let outcome = self.selected.as_mut().map_or_else(
             || Ok(TerminalDeliveryReconciliation::CleanupCompleted),
             CommandExecutor::reconcile_terminal_delivery,
-        )
+        )?;
+        self.credentials.poll(true)?;
+        Ok(outcome)
     }
 
     fn shutdown(&mut self) -> Result<(), DurableRunnerError> {
@@ -340,11 +342,11 @@ impl CommandExecutor for NativeProviderCommandExecutor {
         // provider authority before cleanup so an absent in-memory selection
         // can never turn the cleanup fence into a successful no-op.
         self.select_recovery()?;
-        self.credentials.poll(true)?;
-        if let Some(executor) = self.selected.as_mut() {
+        let cleanup = if let Some(executor) = self.selected.as_mut() {
             executor.shutdown()
         } else {
             Ok(())
-        }
+        };
+        cleanup.and(self.credentials.poll(true))
     }
 }
