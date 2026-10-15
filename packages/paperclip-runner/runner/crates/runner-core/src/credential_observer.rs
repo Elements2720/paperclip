@@ -149,6 +149,8 @@ impl CredentialObserver {
                     return Err(observer_error("descriptor session mismatch"));
                 }
                 let name = provider["agent"].as_str().expect("matched agent");
+                crate::acpx_provider_backend::secure_directory(Path::new(root), "ACPX runtime")
+                    .map_err(|_| observer_error("runtime home is unavailable"))?;
                 let root = fs::canonicalize(root)
                     .map_err(|_| observer_error("runtime home is unavailable"))?;
                 let path = root
@@ -645,6 +647,30 @@ mod tests {
             .configure(&json!({"observeCredentials":true,"provider":{"kind":"opencode"}}))
             .unwrap();
         assert!(disabled.state.is_none());
+    }
+
+    #[test]
+    fn fresh_acpx_observers_create_a_private_runtime_directory() {
+        let f = Fixture::new("codex", &codex("seed"));
+        for provider in ["codex", "grok"] {
+            let state_dir = f.root.join(provider);
+            fs::create_dir(&state_dir).unwrap();
+            fs::set_permissions(&state_dir, fs::Permissions::from_mode(0o700)).unwrap();
+            let runtime = state_dir.join("runtime");
+            assert!(!runtime.exists());
+            let mut observer = CredentialObserver::new(&state_dir, "session");
+            observer.configure(&json!({"observeCredentials":true,"provider":{
+                "kind":"acpx", "agent":provider, "runtimeDirectory":runtime, "normalizedSessionId":"session"
+            }})).unwrap();
+            assert_eq!(
+                fs::metadata(&runtime).unwrap().permissions().mode() & 0o777,
+                0o700
+            );
+            assert_eq!(observer.state.as_ref().unwrap().provider, provider);
+            assert!(observer.pending().is_none());
+            observer.activate().unwrap();
+            assert!(observer.pending().is_none());
+        }
     }
 
     #[test]

@@ -36,6 +36,31 @@ fn temporary_directory(label: &str) -> PathBuf {
 
 #[test]
 #[cfg(unix)]
+fn credential_observation_allows_fresh_acpx_session_startup() {
+    let directory = temporary_directory("fresh-observed-acpx");
+    let config = acpx_config(&directory, "turns-reserved-result-terminal");
+    let mut prepare = prepare_payload(&directory, "codex");
+    prepare["observeCredentials"] = json!(true);
+    let runtime = directory.join("acpx-runtime");
+    assert!(!runtime.exists());
+    let mut executor = NativeProviderCommandExecutor::with_runner_config(&directory, &config);
+    let prepared = executor
+        .execute(&command(1, "run.prepare", prepare))
+        .unwrap();
+    assert_eq!(prepared.result["status"], "prepared");
+    assert_eq!(
+        fs::metadata(&runtime).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
+    executor
+        .execute(&command(2, "session.open", json!({})))
+        .unwrap();
+    executor.shutdown().unwrap();
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+#[cfg(unix)]
 fn credential_updates_replay_through_the_native_executor_until_durable_ack() {
     let root = temporary_directory("credential-updates");
     let root = fs::canonicalize(root).unwrap();
