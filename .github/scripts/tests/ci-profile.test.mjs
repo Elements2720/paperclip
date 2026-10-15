@@ -239,7 +239,14 @@ test("workflow exporter runs trusted code and keeps keys out of the PR jobs", ()
   assert.match(workflow, /environment: ci-profiling/);
   assert.doesNotMatch(workflow, /head_sha|secrets: inherit|contents: write|pull-requests: write|pnpm install/);
   const pr = readFileSync(new URL("../../workflows/pr-trusted.yml", import.meta.url), "utf8");
-  assert.doesNotMatch(pr, /HONEYCOMB.*KEY|\$\{\{\s*secrets(?:\.|\[)/);
+  // A script filename such as docker-compose-secrets.test.mjs is not a
+  // GitHub secret lookup. Check expression context, including bracket access.
+  const secretReference = /HONEYCOMB.*KEY|\$\{\{[^}]*\bsecrets\s*(?:\.|\[)/;
+  assert.doesNotMatch("run: node --test scripts/docker-compose-secrets.test.mjs", secretReference);
+  for (const lookup of ["${{ secrets.PR_TOKEN }}", "${{ secrets['PR_TOKEN'] }}", "${{\n secrets.PR_TOKEN\n }}"]) {
+    assert.match(lookup, secretReference);
+  }
+  assert.doesNotMatch(pr, secretReference);
   assert.match(pr, /if: always\(\) && env.PAPERCLIP_CI_PROFILE == 'true'/);
   assert.doesNotMatch(pr, /PAPERCLIP_CI_PROFILE:.*labels/);
   assert.equal(pr.match(/PAPERCLIP_CI_PROFILE: \$\{\{ needs.gate.outputs.profile_ci \}\}/g).length, 9);

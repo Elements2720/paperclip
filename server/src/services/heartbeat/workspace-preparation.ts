@@ -30,7 +30,7 @@ import { readNativeWorkspaceSyncReference, readNativeWorkspaceSyncLocalCwd } fro
 import { parseObject } from "../../adapters/utils.js";
 import { materializeNativeChatTaskRoot } from "../native-runtime/native-chat-workspace.js";
 import { materializeIsolatedTaskDirectory } from "../isolated-task-directory.js";
-import { canIsolateRemoteWorkspaceSource, materializeIsolatedRemoteWorkspaceSource } from "../isolated-remote-workspace-source.js";
+import { canIsolateRemoteWorkspaceSource, materializeIsolatedRemoteWorkspaceSource, withIsolatedRepositorySourceLock } from "../isolated-remote-workspace-source.js";
 import {
   assertIsolatedWorkspaceSourceReadAccess,
   retainIsolatedWorkspaceSourceAccess,
@@ -149,6 +149,14 @@ function readNonEmptyString(value: unknown): string | null {
 }
 
 export async function prepareHeartbeatWorkspace(db: Db, input: HeartbeatWorkspacePreparationInput) {
+  const sourceIssueId = input.reuse.reusableExistingExecutionWorkspace?.sourceIssueId
+    ?? input.reuse.existingExecutionWorkspace?.sourceIssueId ?? input.task.issueId;
+  if (!sourceIssueId || input.reuse.isDotRun) return prepareHeartbeatWorkspaceLocked(db, input);
+  return withIsolatedRepositorySourceLock(db, input.agent.companyId, sourceIssueId,
+    () => prepareHeartbeatWorkspaceLocked(db, input));
+}
+
+async function prepareHeartbeatWorkspaceLocked(db: Db, input: HeartbeatWorkspacePreparationInput) {
   const { run, agent, controllerLease, nativeRunnerPreparationSpans } = input;
   const timeWorkspace = createHeartbeatPreparationTiming(run.id);
   const {

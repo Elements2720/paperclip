@@ -57,6 +57,15 @@ and [preparation tests](../../server/src/services/heartbeat/workspace-preparatio
 exercise the real Git isolation and lifecycle guards. They do not qualify live
 remote credentials or a provider deployment.
 
+For reconstructable Git expiration, finish a disposable task tree, run the
+internal lifecycle sweep after its 24-hour grace, and inspect candidate/reclaimed
+bytes. Advance its upstream first; use the ordinary task/workspace reopen control
+and verify the original commit, file contents, and subsequent persisted work.
+Current runs, previews, recovery, unique files and shared base clones must stay.
+The [expiration tests](../../server/src/__tests__/git-workspace-expiration.test.ts)
+exercise real local Git and database paths, interruption and concurrent reopening;
+cloud credentials and the deployed user journey require separate live evidence.
+
 For task workspace selection, use the authorized task workspace API to choose a
 task directory, project source, or existing workspace. Verify that a change
 made during a run stays pending until the next normal admission. Submit another

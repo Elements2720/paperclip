@@ -1,3 +1,6 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+import { withDedicatedDbConnection, type Db } from "@paperclipai/db";
+import { sql } from "drizzle-orm";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { execFile as execFileCallback } from "node:child_process";
@@ -9,6 +12,25 @@ import { materializeManagedProjectWorkspace } from "./managed-repository-checkou
 import { measureRunPhase } from "./execution-preparation-timing.js";
 
 const execFile = promisify(execFileCallback);
+
+const sourceLocks = new AsyncLocalStorage<ReadonlyArray<{ db: Db; key: string }>>();
+export class IsolatedRepositorySourceBusy extends Error {}
+
+/** Creation, reopening and base expiration share this cross-process exclusion. */
+export async function withIsolatedRepositorySourceLock<T>(db: Db, companyId: string, issueId: string,
+  action: () => Promise<T>, tryOnly = false): Promise<T> {
+  const key = `isolated_repository_source:${companyId}:${issueId}`;
+  const held = sourceLocks.getStore() ?? [];
+  if (held.some(lock => lock.db === db && lock.key === key)) return action();
+  return withDedicatedDbConnection(db, connection => connection.transaction(async tx => {
+    if (tryOnly) {
+      const rows = await tx.execute<{ acquired: boolean }>(sql`select pg_try_advisory_xact_lock(hashtextextended(${key}, 0)) as acquired`);
+      if (!rows[0]?.acquired) throw new IsolatedRepositorySourceBusy();
+    } else await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
+    return sourceLocks.run([...held, { db, key }], action);
+  }));
+}
+
 
 export function isolatedRemoteSourcePath(companyId: string, issueId: string): string {
   if ([companyId, issueId].some(id => !/^[a-zA-Z0-9_-]+$/.test(id))) {

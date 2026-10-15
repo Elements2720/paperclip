@@ -57,6 +57,14 @@ are revalidated for reuse, cleanup and reopening. A failed save removes only the
 owned task worktree. The [isolated-source service](../../server/src/services/isolated-remote-workspace-source.ts)
 and its local regression tests establish source and lifecycle boundaries; live
 agent/provider qualification remains separate.
+Reconstructable Git expiration adds no agent endpoint or permission. It records
+company/workspace/repository identity and an exact commit before removing owned
+cache files. Existing task/workspace reopening retains current company, source,
+and trust checks. Missing upstream access returns a retryable error; it does not
+choose a newer commit or grant access to another company's source. Shared project
+bases and unresolved recovery remain protected. Local lifecycle evidence is in
+[expiration tests](../../server/src/__tests__/git-workspace-expiration.test.ts).
+
 Writable aliases must also be compatible with current and retained physical
 source projects' trust boundaries. Incompatible choices are rejected before
 dispatch; a projectless alias cannot bypass required sandbox containment.
