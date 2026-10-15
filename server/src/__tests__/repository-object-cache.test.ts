@@ -9,6 +9,7 @@ import { createReadStream } from "node:fs";
 import { afterEach, expect, it, vi } from "vitest";
 import { withDirectoryMergeLock } from "@paperclipai/adapter-utils/workspace-restore-merge";
 import { materializeManagedProjectWorkspace } from "../services/managed-repository-checkout.js";
+import { assertReproducibleBaseGitStorage } from "../services/git-workspace-restoration.js";
 import { readRepositoryObjectCache, resolveRepositoryObjectCache, publishRepositoryObjectCache } from "../services/repository-object-cache.js";
 
 const execFile = promisify(execute);
@@ -53,6 +54,7 @@ it("uses current remote refs and produces an independent checkout without privat
   expect(await fs.readFile(path.join(target, "work.txt"), "utf8")).toBe("current\n");
   await expect(f.git(target, "cat-file", "-e", privateHead)).rejects.toThrow();
   await expect(fs.stat(path.join(target, ".git/objects/info/alternates"))).rejects.toMatchObject({ code: "ENOENT" });
+  await assertReproducibleBaseGitStorage(target);
   await fs.rm(f.company, { recursive: true });
   await f.git(target, "fsck", "--full");
   expect(await f.git(target, "show", "HEAD~1:work.txt")).toBe("initial");

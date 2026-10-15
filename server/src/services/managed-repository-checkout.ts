@@ -72,7 +72,7 @@ export async function materializeManagedProjectWorkspace(
     try {
       const clone = (referencePath: string | null) => measureRunPhase("workspace.checkout.git_clone", () => execFile(
         "git",
-        [...(auth?.configArgs ?? []), "clone", "--no-hardlinks", ...(referencePath ? ["--reference-if-able", referencePath, "--dissociate"] : []), "--", cloneSource, cloneTmpDir],
+        [...(auth?.configArgs ?? []), ...(referencePath ? ["-c", "repack.updateServerInfo=false"] : []), "clone", "--no-hardlinks", ...(referencePath ? ["--reference-if-able", referencePath, "--dissociate"] : []), "--", cloneSource, cloneTmpDir],
         {
           env: {
             ...sanitizeRuntimeServiceBaseEnv(process.env),
