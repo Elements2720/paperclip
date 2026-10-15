@@ -88,8 +88,13 @@ it("skips contended optional cache publication without delaying a fresh checkout
 it("rebuilds from the remote when the cached pack is corrupt", async () => {
   const f = await fixture(); await f.prepare("first");
   const cache = (await resolveRepositoryObjectCache(f.company, f.repoUrl, null))!;
-  for (const entry of await fs.readdir(path.join(cache.directory, "objects/pack"))) {
-    if (entry.endsWith(".pack")) await fs.writeFile(path.join(cache.directory, "objects/pack", entry), "corrupted");
+  await f.git(cache.directory, "gc", "--prune=now");
+  const packs = (await fs.readdir(path.join(cache.directory, "objects/pack"))).filter(entry => entry.endsWith(".pack"));
+  expect(packs.length).toBeGreaterThan(0);
+  for (const entry of packs) {
+    const file = path.join(cache.directory, "objects/pack", entry);
+    await fs.chmod(file, 0o600);
+    await fs.writeFile(file, "corrupted");
   }
   await f.git(path.join(f.root, "first"), "fsck", "--full");
   await f.prepare("second");
