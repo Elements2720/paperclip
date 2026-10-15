@@ -79,6 +79,7 @@ export interface TypedEventFamilyCapability {
 }
 
 export const CANONICAL_PROVIDER_EVENT_TYPES = [
+  "auth.credentials.updated",
   "harness.diagnostic",
   "plan.updated",
   "tool.execution.started",

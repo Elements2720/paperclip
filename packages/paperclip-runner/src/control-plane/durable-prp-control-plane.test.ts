@@ -46,6 +46,45 @@ const identity: DurableRecoveryIdentity = {
 const expectedRunnerVersion = "0.3.0";
 const expectedRunnerDigest = `sha256:${"a".repeat(64)}`;
 
+it("commits credential updates before ACK and preserves replay identity", async () => {
+  const root = mkdtempSync(resolve(tmpdir(), "runner-credential-update-"));
+  let release!: () => void;
+  const barrier = new Promise<void>(resolveCommit => { release = resolveCommit; });
+  const commits = vi.fn(async () => barrier);
+  const core = new DurablePrpControlPlane({ stateDirectory: root, identity,
+    expectedRunnerVersion, expectedRunnerDigest, onCommittedEvent: commits });
+  try {
+    await core.start();
+    const client = (await authenticate(core, core.issueBootstrapTicket()))!;
+    const frame = semanticInputEvent();
+    const event = frame.payload as Record<string, unknown>;
+    event.sourceEventId = "credential-update-1";
+    event.eventType = "auth.credentials.updated";
+    event.payload = { schema: "paperclip.auth.credentials.updated.v1", provider: "codex",
+      bindingId: "harness-auth", revision: 1, detection: "credential_store" };
+    sendSecure(client, frame);
+    await vi.waitFor(() => expect(commits).toHaveBeenCalledTimes(1));
+    expect(core.store.state.ackedSourceSeq).toBe(0);
+    release();
+    const ack = (await receiveSecure(client))!;
+    expect(ack.kind).toBe("ack");
+    expect(core.store.state.ackedSourceSeq).toBe(1);
+    expect(commits).toHaveBeenCalledWith(expect.objectContaining({
+      eventType: "auth.credentials.updated", payload: event.payload,
+    }));
+    sendSecure(client, frame);
+    expect((await receiveSecure(client))!.kind).toBe("ack");
+    expect(core.store.state.committedEvents).toHaveLength(1);
+    expect(core.store.state.committedEvents[0].deliveryCount).toBe(2);
+    expect(core.store.state.committedEvents[0].logicalEffectCount).toBe(1);
+    client.socket.destroy();
+  } finally {
+    release();
+    await core.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 function renewalRequest(client: AuthenticatedClient, expiresAt: number): Record<string, unknown> {
   return {
     protocol: "paperclip.runner", version: client.welcome.version,

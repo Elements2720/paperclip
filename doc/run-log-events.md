@@ -21,6 +21,15 @@ They also become native Observability spans only with an operator OTLP endpoint.
 
 ## Native PRP Run-Log Events
 
+`auth.credentials.updated` is a runner-produced PRP event for a change to a
+supported credential store. The native coordinator stores it through the same
+PRP append path before it acknowledges delivery. Its payload contains only a
+provider, an opaque binding ID, a revision, and a detection method. It contains
+no credentials, account identity, file path, or credential fingerprint. The
+consumer can use the event to read the updated credentials through its existing
+private credential channel. This run-log event stays in the instance database.
+
+
 `native.recovery.execution_reclaimed` records an atomic same-run recovery claim
 that restores a released task execution binding. The claim locks the task,
 coordinator, and original run in that order. It preserves the assignee and checks

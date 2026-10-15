@@ -1230,6 +1230,8 @@ export interface CapabilityRunnerdProcessEvidence {
 
 export interface CapabilityRunnerdCodexTransportOptions extends RunnerExecutionDriver {
   provider?: "codex" | "opencode" | "claude_managed" | "aws_agentcore" | "acpx";
+  /** Opt in to content-free credential change events from supported harnesses. */
+  observeCredentials?: boolean;
   opencodePermissionMode?: NativeOpenCodePermissionMode;
   acpxAgent?: QualifiedAcpxAgent;
   /** Explicit evaluation-only candidate selection, never derived from persisted session input. */
@@ -4904,6 +4906,7 @@ class DurablePrpCodexTransport implements CodexAppServerTransport {
       ? resolveAcpxProviderMode(acpxProfile!.agent, this.options.acpxMode) : undefined;
     const completionContract = record(params.completionContract);
     const runAttachTemplate = {
+      observeCredentials: this.options.observeCredentials !== false,
       authorizedTools: this.#authorizedTools,
       ...(completionContract.revision &&
       Array.isArray(completionContract.criterionIds)
