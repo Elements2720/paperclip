@@ -115,6 +115,13 @@ apply. Top-level DM replies retain their linear conversation destination. Source
 [queued run policy](../../server/src/services/durable-chat-wakeup.ts). Live Slack
 verification of this exemption remains separate from provider-fixture coverage.
 
+Controller-owned receipt reactions accept the SDK's empty thread timestamp for
+linear DMs. Channel IDs and source message timestamps remain validated. This
+does not add an agent tool or change sender, task, or credential authorization.
+The pinned SDK transport regression is covered in
+[receipt tests](../../server/src/services/chat-slack-receipts.test.ts); live
+acknowledgement speed needs a separate provider test.
+
 New conversations resolve typed project/workspace defaults from their endpoint
 and destination under the task-creation transaction. Defaults do not authorize
 private sources: admission checks the linked user's authority and assigned agent.

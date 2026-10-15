@@ -48,6 +48,11 @@ top-level replies to top-level DMs. Channel messages and thread replies still
 require a mention when that setting is enabled. Disable direct messages and
 confirm a plain DM is rejected. Use a private channel for threaded conversations.
 
+During a top-level DM run, verify that the bot adds eyes to the source message
+and removes them when the final reply arrives. The pinned Slack SDK encodes a
+linear DM with an empty thread timestamp; receipt transport accepts that address
+while still validating the channel and the source message timestamp.
+
 ### `endpoint-management`
 
 Automated: [channel integration](../../server/src/__tests__/chat-channels.integration.test.ts) covers shared endpoint/delivery behavior; live credential repair and provider ownership remain manual checks.
