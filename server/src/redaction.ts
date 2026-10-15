@@ -50,6 +50,7 @@ const PAPERCLIP_SCHEMA_FIELDS = new Set(["schema", "runtimeSchema"]);
 export const PAPERCLIP_PUBLIC_SCHEMA_IDS = new Set([
   "paperclip.artifact.generated.v1",
   "paperclip.artifact.viewed.v1",
+  "paperclip.auth.credentials.updated.v1",
   "paperclip.capability-discovery.v1",
   "paperclip.capability.authorization-record.v1",
   "paperclip.capability.control-plane.v1",
@@ -213,6 +214,7 @@ export const PRP_V1_EVENT_TYPES = new Set([
   "workspace.change.updated",
   "workspace.diff.recorded",
   "workspace.file.referenced",
+  "auth.credentials.updated",
   "harness.starting",
   "harness.ready",
   "harness.exited",
