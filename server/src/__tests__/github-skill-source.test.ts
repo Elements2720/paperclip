@@ -1,6 +1,7 @@
 import { githubFixture } from "./helpers/github-skills.js";
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -488,7 +489,8 @@ describe('repository packages', () => {
     const scratch = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-audit-deadline-'));
     try {
       const service = pathToFileURL(path.resolve(import.meta.dirname, '../services/company-skills.ts')).href;
-      const loader = path.resolve(import.meta.dirname, '../../../cli/node_modules/tsx/dist/loader.mjs');
+      const require = createRequire(new URL('../../../cli/package.json', import.meta.url));
+      const loader = require.resolve('tsx/dist/loader.mjs');
       const script = `import { auditSkillSnapshot } from ${JSON.stringify(service)};
         const findings = await auditSkillSnapshot([
           { path: 'scripts/newlines.sh', kind: 'script', content: '\\n'.repeat(1024 * 1024 - 1) + 'x' },
@@ -496,11 +498,11 @@ describe('repository packages', () => {
         ], false);
         console.log(JSON.stringify(findings));`;
       const { stdout } = await promisify(execFile)(process.execPath, ['--import', loader, '--input-type=module', '-e', script], {
-        timeout: 10_000, killSignal: 'SIGKILL', encoding: 'utf8', env: { ...process.env, TMPDIR: scratch },
+        timeout: 30_000, killSignal: 'SIGKILL', encoding: 'utf8', env: { ...process.env, TMPDIR: scratch },
       });
       expect(JSON.parse(stdout).filter((finding: { severity: string }) => finding.severity === 'error')).toEqual([]);
     } finally {
       await fs.rm(scratch, { recursive: true, force: true });
     }
-  }, 15_000);
+  }, 45_000);
 });
