@@ -490,7 +490,7 @@ describe('repository packages', () => {
     try {
       const service = pathToFileURL(path.resolve(import.meta.dirname, '../services/company-skills.ts')).href;
       const require = createRequire(new URL('../../../cli/package.json', import.meta.url));
-      const loader = require.resolve('tsx/dist/loader.mjs');
+      const loader = require.resolve('tsx/esm');
       const script = `import { auditSkillSnapshot } from ${JSON.stringify(service)};
         const findings = await auditSkillSnapshot([
           { path: 'scripts/newlines.sh', kind: 'script', content: '\\n'.repeat(1024 * 1024 - 1) + 'x' },
